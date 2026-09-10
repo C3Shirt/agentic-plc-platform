@@ -37,6 +37,7 @@ class LLMConfig:
     api_key: str | None
     model: str
     timeout_seconds: float = 15.0
+    max_tokens: int = 300
 
     @property
     def is_configured(self) -> bool:
@@ -52,6 +53,7 @@ class LLMConfig:
         merged.update(environ or os.environ)
 
         timeout = merged.get("LLM_TIMEOUT_SECONDS", "15")
+        max_tokens = merged.get("LLM_MAX_TOKENS", "300")
         return cls(
             base_url=first_present(
                 merged,
@@ -73,6 +75,7 @@ class LLMConfig:
             )
             or "gpt-4o-mini",
             timeout_seconds=float(timeout),
+            max_tokens=int(max_tokens),
         )
 
 

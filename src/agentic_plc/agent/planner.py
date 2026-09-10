@@ -152,6 +152,7 @@ class OpenAICompatiblePlanner:
         payload = {
             "model": self._config.model,
             "temperature": 0.1,
+            "max_tokens": self._config.max_tokens,
             "messages": [
                 {
                     "role": "system",
@@ -159,14 +160,7 @@ class OpenAICompatiblePlanner:
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(
-                        {
-                            "events": [
-                                self._compact_event(event) for event in events[-20:]
-                            ]
-                        },
-                        sort_keys=True,
-                    ),
+                    "content": self._user_prompt(events),
                 },
             ],
         }
@@ -217,23 +211,21 @@ class OpenAICompatiblePlanner:
         raise PlannerResponseError(f"LLM planner request failed: {last_error}")
 
     def _system_prompt(self) -> str:
-        allowed = ", ".join(self.ALLOWED_ACTIONS)
+        return "Return only compact valid JSON. No markdown. No prose."
+
+    def _user_prompt(self, events: list[ICSEvent]) -> str:
+        compact_events = [self._compact_event(event) for event in events[-8:]]
         return (
-            "You are an agent controller for an ICS honeypot. Return only one JSON "
-            "object. You may propose deception actions, generated Modbus TCP response "
-            "bytes, and bounded world-model state patches. All proposals are validated "
-            "before use. Do not output shell commands, exploit steps, or prose outside "
-            "the JSON object. "
-            f"Allowed actions: {allowed}. "
-            "Preferred schema: {deception_plan, protocol_reply, world_patch}. "
-            "deception_plan fields: actor_id, action, target, reason, ttl_seconds, "
-            "parameters. protocol_reply fields: protocol, payload_hex, reason, "
-            "transaction_id, unit_id, metadata. Use protocol 'modbus_tcp'. "
-            "world_patch fields: actor_id, reason, ttl_seconds, operations; each "
-            "operation has path, value, reason. Allowed paths: level_percent, "
-            "pressure_bar, level_setpoint_percent, inlet_valve_open, "
-            "outlet_pump_running, high_level_alarm, mode. Use null fields or action "
-            "'none' if no change is warranted."
+            "You control a tank-pump simulator. Return one JSON object with "
+            "keys deception_plan, protocol_reply, world_patch. Use null for "
+            "unused keys. For read_process Modbus events, you may return "
+            "protocol_reply with protocol=modbus_tcp, payload_hex, reason, "
+            "transaction_id, unit_id. For repeated write_setpoint events, return "
+            "deception_plan action=publish_maintenance_note and optionally a "
+            "world_patch using only level_percent, pressure_bar, "
+            "level_setpoint_percent, inlet_valve_open, outlet_pump_running, "
+            "high_level_alarm, mode. Events: "
+            + json.dumps({"events": compact_events}, sort_keys=True)
         )
 
     def _compact_event(self, event: ICSEvent) -> dict[str, object]:

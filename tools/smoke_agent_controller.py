@@ -9,6 +9,7 @@ from agentic_plc.agent import (
     AgentController,
     LLMConfig,
     OpenAICompatiblePlanner,
+    PlannerResponseError,
     RuleBasedDeceptionPlanner,
 )
 from agentic_plc.contracts.events import ICSEvent, Intent
@@ -50,7 +51,15 @@ def main() -> int:
         planner_name = "rule"
 
     world = TankPumpWorld()
-    decision = AgentController(planner, world=world).run_once(store.iter_events())
+    llm_error = None
+    try:
+        decision = AgentController(planner, world=world).run_once(store.iter_events())
+    except PlannerResponseError as exc:
+        llm_error = str(exc)
+        decision = AgentController(RuleBasedDeceptionPlanner(), world=world).run_once(
+            store.iter_events()
+        )
+        planner_name = f"{planner_name}_fallback_rule"
 
     protocol_demo = AgentController(RuleBasedDeceptionPlanner()).run_once(
         sample_read_events()
@@ -58,6 +67,7 @@ def main() -> int:
     output = {
         "event_log": str(args.events),
         "llm_configured": config.is_configured,
+        "llm_error": llm_error,
         "planner": planner_name,
         "summary": summarize_events(store.iter_events()).to_dict(),
         "accepted": [plan_to_dict(plan) for plan in decision.accepted],
