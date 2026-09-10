@@ -1,0 +1,28 @@
+<core>
+    <template>
+        <entity name="unit">TE Reactor Separator Controller</entity>
+        <entity name="vendor">Siemens</entity>
+        <entity name="description">Tennessee Eastman reactor/separator PLC slice backed by a generic process backend</entity>
+        <entity name="protocols">MODBUS</entity>
+        <entity name="creator">agentic-plc-platform</entity>
+    </template>
+    <databus>
+        <key_value_mappings>
+            <key name="FacilityName">
+                <value type="value">"Eastman Chemical Demonstration Unit"</value>
+            </key>
+            <key name="SystemName">
+                <value type="value">"TE Reactor Separator PLC"</value>
+            </key>
+            <key name="SystemDescription">
+                <value type="value">"Siemens PCS 7, reactor and separator control cell"</value>
+            </key>
+            <key name="agenticPlcSlave1InputRegisters">
+                <value type="function" param="['input_registers', 'tennessee_eastman_idv1', 'external/tennessee_eastman', 'scenarios/tennessee_eastman/scenario.json', 'idv1', 1]">agentic_plc.adapters.conpot_databus.ConpotTennesseeEastmanBlock</value>
+            </key>
+            <key name="agenticPlcSlave1HoldingRegisters">
+                <value type="function" param="['holding_registers', 'tennessee_eastman_idv1', 'external/tennessee_eastman', 'scenarios/tennessee_eastman/scenario.json', 'idv1', 1]">agentic_plc.adapters.conpot_databus.ConpotTennesseeEastmanBlock</value>
+            </key>
+        </key_value_mappings>
+    </databus>
+</core>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from agentic_plc.contracts.events import Intent
 from agentic_plc.world.registers import RegisterAccessError, RegisterArea, RegisterWrite
 
 from .base import ProcessBackend
@@ -71,6 +72,16 @@ class ProcessRegisterMap:
         for offset, value in enumerate(values):
             writes.append(self.write(area, address + offset, value))
         return writes
+
+    def intent_for_write(self, area: RegisterArea | str, address: int) -> Intent:
+        area = RegisterArea(area)
+        point = self._point_at(area, address)
+        variable = self.backend.variables[point.variable_id]
+        if variable.role == "setpoint":
+            return Intent.WRITE_SETPOINT
+        if variable.role == "manipulated_variable":
+            return Intent.CONTROL_OUTPUT
+        return Intent.UNSUPPORTED_OPERATION
 
     def encode_blocks(self) -> dict[RegisterArea, list[int]]:
         blocks: dict[RegisterArea, list[int]] = {}

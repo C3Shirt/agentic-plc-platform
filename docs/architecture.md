@@ -57,7 +57,10 @@ TCP frame.
 Current status: a generic process-backend layer exists for future physical
 processes. `TraceProcessBackend` replays sampled traces and
 `TennesseeEastmanTraceBackend` adapts TE IDV `t/y/u/r.dat` files into canonical
-measurement, manipulated-variable, and setpoint variables.
+measurement, manipulated-variable, and setpoint variables. `ProcessRegisterMap`
+turns scenario-mapped process variables into Modbus-style blocks, and
+`integrations/conpot/tennessee_eastman` loads that mapping through Conpot
+DataBus function values.
 
 ### P2 - Unified telemetry
 

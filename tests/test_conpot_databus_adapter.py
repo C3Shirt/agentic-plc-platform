@@ -1,12 +1,18 @@
 import unittest
+from pathlib import Path
+import tempfile
 from typing import Any
 
 from agentic_plc.adapters.conpot_databus import (
     ConpotDatabusAdapter,
     ConpotTankPumpBlock,
+    ConpotTennesseeEastmanBlock,
+    get_shared_tennessee_eastman_runtime,
     get_shared_tank_pump_runtime,
+    reset_shared_tennessee_eastman_runtime,
     reset_shared_tank_pump_runtime,
 )
+from agentic_plc.contracts.events import Intent
 from agentic_plc.telemetry.event_log import InMemoryEventLog
 from agentic_plc.world.model import OperatingMode, TankPumpWorld
 from agentic_plc.world.registers import RegisterArea, TankPumpRegisterMap
@@ -150,6 +156,57 @@ class ConpotDatabusAdapterTests(unittest.TestCase):
         self.assertTrue(runtime.world.state.outlet_pump_running)
         self.assertEqual(coils[0], 1)
         self.assertEqual(len(runtime.event_log.list_events()), 2)
+
+    def test_xml_friendly_te_blocks_share_one_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            asset_root = Path(directory)
+            trace_dir = asset_root / "extracted" / "idv1"
+            trace_dir.mkdir(parents=True)
+            _write_matrix(trace_dir / "t.dat", [[0.0, 1.0e30, -1.0]])
+            _write_matrix(trace_dir / "y.dat", [_row(1.0, 51)])
+            _write_matrix(trace_dir / "u.dat", [_row(1.0, 12)])
+            _write_matrix(trace_dir / "r.dat", [_row(1.0, 36)])
+
+            runtime_id = "unit-test-te-runtime"
+            reset_shared_tennessee_eastman_runtime(
+                runtime_id=runtime_id,
+                asset_root=str(asset_root),
+            )
+
+            inputs = ConpotTennesseeEastmanBlock(
+                "input_registers",
+                runtime_id,
+                str(asset_root),
+            )
+            holding = ConpotTennesseeEastmanBlock(
+                "holding_registers",
+                runtime_id,
+                str(asset_root),
+            )
+
+            self.assertEqual(inputs[0:3], [7, 80, 90])
+            holding[5] = 420
+
+            runtime = get_shared_tennessee_eastman_runtime(
+                runtime_id=runtime_id,
+                asset_root=str(asset_root),
+            )
+            self.assertEqual(runtime.backend.read("xmv_10"), 42.0)
+            self.assertEqual(holding[5], 420)
+            events = runtime.event_log.list_events()
+            self.assertEqual(events[-1].intent, Intent.CONTROL_OUTPUT)
+            self.assertEqual(events[-1].result, "accepted")
+
+
+def _row(start: float, count: int) -> list[float]:
+    return [start + offset for offset in range(count)]
+
+
+def _write_matrix(path: Path, rows: list[list[float]]) -> None:
+    path.write_text(
+        "\n".join("\t".join(str(value) for value in row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

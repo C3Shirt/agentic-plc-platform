@@ -108,6 +108,15 @@ $env:PYTHONPATH = "src;..\conpot-main\conpot-main"
 python tools\smoke_modbus_tcp.py
 ```
 
+The Tennessee Eastman Conpot template uses the same generic process mapping
+stack and can be checked with:
+
+```powershell
+$env:PYTHONPATH = "src;..\conpot-main\conpot-main"
+python tools\smoke_conpot_te_template.py
+python tools\smoke_te_modbus_tcp.py
+```
+
 This smoke script starts Conpot, installs the agentic Modbus databank hook, and
 demonstrates a generated Modbus TCP response:
 
