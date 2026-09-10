@@ -36,6 +36,8 @@ deterministic response path.
 - `ConpotDatabusAdapter` installs list-like dynamic blocks into a Conpot-style
   DataBus. Reads are generated from the current world state, and writes are
   converted back into validated world transitions.
+- `create_tank_pump_hmi_server` exposes a minimal HTTP HMI backed by the same
+  `TankPumpWorld`.
 - `InMemoryEventLog` records accepted and rejected register writes with the
   normalized `ICSEvent` contract.
 - `JsonlEventStore` persists normalized events for replay and offline analysis.
@@ -102,6 +104,14 @@ demonstrates a generated Modbus TCP response:
 ```powershell
 $env:PYTHONPATH = "src;..\conpot-main\conpot-main"
 python tools\smoke_agentic_modbus_hook.py
+```
+
+This smoke script runs Modbus and HTTP HMI against the same world model and
+checks cross-surface state consistency:
+
+```powershell
+$env:PYTHONPATH = "src;..\conpot-main\conpot-main"
+python tools\smoke_cross_surface.py
 ```
 
 The agent smoke uses the no-LLM planner by default and writes sample events to

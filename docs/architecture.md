@@ -67,6 +67,11 @@ added at the protocol adapter layer.
 
 Gate: Modbus, HTTP, and SSH expose the same world revision.
 
+Current status: a minimal HTTP HMI exists and is backed by the same
+`TankPumpWorld` as the Conpot Modbus template. The cross-surface smoke writes a
+setpoint through Modbus, reads it through HMI, then writes through HMI and reads
+the updated holding register through Modbus.
+
 ### P4 - Agent controller with generated replies and bounded state mutation
 
 - Add trajectory classification.
