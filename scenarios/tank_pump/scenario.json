@@ -1,0 +1,32 @@
+{
+  "scenario_id": "tank_pump_v1",
+  "asset": {
+    "site": "North Process Utilities",
+    "role": "Tank and transfer-pump controller",
+    "plc_vendor": "Siemens",
+    "plc_family": "SIMATIC"
+  },
+  "register_map": {
+    "coils": {
+      "0": "outlet_pump_running",
+      "1": "inlet_valve_open"
+    },
+    "discrete_inputs": {
+      "0": "high_level_alarm"
+    },
+    "input_registers": {
+      "0": "level_percent_x10",
+      "1": "pressure_bar_x100"
+    },
+    "holding_registers": {
+      "0": "level_setpoint_percent_x10",
+      "1": "operating_mode_code"
+    }
+  },
+  "operating_mode_codes": {
+    "0": "stop",
+    "1": "manual",
+    "2": "auto",
+    "3": "fault"
+  }
+}

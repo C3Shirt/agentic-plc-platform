@@ -1,0 +1,39 @@
+<modbus enabled="True" host="0.0.0.0" port="5020">
+    <device_info>
+        <VendorName>Siemens</VendorName>
+        <ProductCode>SIMATIC</ProductCode>
+        <MajorMinorRevision>TankPump-1.0</MajorMinorRevision>
+    </device_info>
+    <mode>serial</mode>
+    <delay>100</delay>
+    <slaves>
+        <slave id="1">
+            <blocks>
+                <block name="agenticPlcSlave1Coils">
+                    <type>COILS</type>
+                    <starting_address>0</starting_address>
+                    <size>2</size>
+                    <content>agenticPlcSlave1Coils</content>
+                </block>
+                <block name="agenticPlcSlave1DiscreteInputs">
+                    <type>DISCRETE_INPUTS</type>
+                    <starting_address>0</starting_address>
+                    <size>1</size>
+                    <content>agenticPlcSlave1DiscreteInputs</content>
+                </block>
+                <block name="agenticPlcSlave1InputRegisters">
+                    <type>ANALOG_INPUTS</type>
+                    <starting_address>0</starting_address>
+                    <size>2</size>
+                    <content>agenticPlcSlave1InputRegisters</content>
+                </block>
+                <block name="agenticPlcSlave1HoldingRegisters">
+                    <type>HOLDING_REGISTERS</type>
+                    <starting_address>0</starting_address>
+                    <size>2</size>
+                    <content>agenticPlcSlave1HoldingRegisters</content>
+                </block>
+            </blocks>
+        </slave>
+    </slaves>
+</modbus>

@@ -1,0 +1,34 @@
+<core>
+    <template>
+        <entity name="unit">Agentic Tank Pump Controller</entity>
+        <entity name="vendor">Siemens</entity>
+        <entity name="description">Deterministic tank and transfer-pump PLC scenario</entity>
+        <entity name="protocols">MODBUS</entity>
+        <entity name="creator">agentic-plc-platform</entity>
+    </template>
+    <databus>
+        <key_value_mappings>
+            <key name="FacilityName">
+                <value type="value">"North Process Utilities"</value>
+            </key>
+            <key name="SystemName">
+                <value type="value">"Tank Transfer PLC"</value>
+            </key>
+            <key name="SystemDescription">
+                <value type="value">"Siemens, SIMATIC, tank-pump process"</value>
+            </key>
+            <key name="agenticPlcSlave1Coils">
+                <value type="function" param="['coils', 'tank_pump_v1', 1]">agentic_plc.adapters.conpot_databus.ConpotTankPumpBlock</value>
+            </key>
+            <key name="agenticPlcSlave1DiscreteInputs">
+                <value type="function" param="['discrete_inputs', 'tank_pump_v1', 1]">agentic_plc.adapters.conpot_databus.ConpotTankPumpBlock</value>
+            </key>
+            <key name="agenticPlcSlave1InputRegisters">
+                <value type="function" param="['input_registers', 'tank_pump_v1', 1]">agentic_plc.adapters.conpot_databus.ConpotTankPumpBlock</value>
+            </key>
+            <key name="agenticPlcSlave1HoldingRegisters">
+                <value type="function" param="['holding_registers', 'tank_pump_v1', 1]">agentic_plc.adapters.conpot_databus.ConpotTankPumpBlock</value>
+            </key>
+        </key_value_mappings>
+    </databus>
+</core>
