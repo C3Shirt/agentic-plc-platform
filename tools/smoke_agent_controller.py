@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from agentic_plc.agent import (
@@ -28,6 +28,10 @@ def main() -> int:
         type=Path,
         default=Path("records") / "agent_smoke_events.jsonl",
     )
+    parser.add_argument(
+        "--model",
+        help="Override the .env model for --live-llm without printing secrets.",
+    )
     args = parser.parse_args()
 
     events = sample_events()
@@ -36,6 +40,8 @@ def main() -> int:
     store.append_many(events)
 
     config = LLMConfig.from_env(".env")
+    if args.model:
+        config = replace(config, model=args.model)
     if args.live_llm:
         planner = OpenAICompatiblePlanner(config)
         planner_name = "llm"

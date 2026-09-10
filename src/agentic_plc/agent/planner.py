@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Protocol
 
@@ -40,6 +41,11 @@ class RuleBasedDeceptionPlanner:
 
         if latest.intent is Intent.READ_PROCESS and latest.transaction_id:
             unit_id = latest.unit_id if latest.unit_id is not None else 1
+            function_code = int(latest.metadata.get("function_code", 3))
+            if function_code not in {3, 4}:
+                function_code = 3
+            count = int(latest.count or 2)
+            values = ([500, 120] + [0] * max(0, count - 2))[:count]
             return AgentProposal(
                 protocol_reply=ProtocolReply(
                     protocol="modbus_tcp",
@@ -48,8 +54,8 @@ class RuleBasedDeceptionPlanner:
                     payload_hex=build_modbus_tcp_read_registers_response(
                         transaction_id=int(str(latest.transaction_id), 0),
                         unit_id=unit_id,
-                        function_code=3,
-                        values=[500, 120],
+                        function_code=function_code,
+                        values=values,
                     ),
                     reason="Return a plausible generated Modbus process snapshot.",
                 )
@@ -176,22 +182,39 @@ class OpenAICompatiblePlanner:
 
     def _post_json(self, payload: dict[str, object]) -> dict[str, object]:
         body = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            url=completion_url(self._config.base_url or ""),
-            data=body,
-            headers={
-                "Authorization": f"Bearer {self._config.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=self._config.timeout_seconds
-            ) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise PlannerResponseError(f"LLM planner request failed: {exc}") from exc
+        last_error: Exception | None = None
+        for url in completion_url_candidates(self._config.base_url or ""):
+            request = urllib.request.Request(
+                url=url,
+                data=body,
+                headers={
+                    "Authorization": f"Bearer {self._config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(
+                    request, timeout=self._config.timeout_seconds
+                ) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code == 404:
+                    continue
+                raise PlannerResponseError(
+                    f"LLM planner request failed: HTTP Error {exc.code}: "
+                    f"{_safe_http_error_body(exc)}"
+                ) from exc
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                last_error = exc
+                break
+        if isinstance(last_error, urllib.error.HTTPError):
+            raise PlannerResponseError(
+                f"LLM planner request failed: HTTP Error {last_error.code}: "
+                f"{_safe_http_error_body(last_error)}"
+            )
+        raise PlannerResponseError(f"LLM planner request failed: {last_error}")
 
     def _system_prompt(self) -> str:
         allowed = ", ".join(self.ALLOWED_ACTIONS)
@@ -232,10 +255,28 @@ class OpenAICompatiblePlanner:
 
 
 def completion_url(base_url: str) -> str:
+    return completion_url_candidates(base_url)[0]
+
+
+def completion_url_candidates(base_url: str) -> list[str]:
     base = base_url.rstrip("/")
     if base.endswith("/chat/completions"):
-        return base
-    return f"{base}/chat/completions"
+        return [base]
+    candidates = [f"{base}/chat/completions"]
+    parsed = urllib.parse.urlparse(base)
+    path = parsed.path.rstrip("/")
+    if path != "/v1":
+        candidates.append(f"{base}/v1/chat/completions")
+    return list(dict.fromkeys(candidates))
+
+
+def _safe_http_error_body(error: urllib.error.HTTPError) -> str:
+    try:
+        body = error.read().decode("utf-8", errors="replace")
+    except Exception:
+        return "<unreadable>"
+    compact = " ".join(body.split())
+    return compact[:500] if compact else "<empty>"
 
 
 def parse_json_object(text: str) -> dict[str, object]:

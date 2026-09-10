@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -20,6 +21,9 @@ class InMemoryEventLog:
 
     def list_events(self) -> list[ICSEvent]:
         return list(self._events)
+
+    def iter_events(self) -> Iterator[ICSEvent]:
+        yield from self._events
 
     def clear(self) -> None:
         self._events.clear()

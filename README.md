@@ -46,6 +46,10 @@ deterministic response path.
   - `protocol_reply`: generated Modbus TCP response bytes in hex.
   - `world_patch`: bounded mutations to tank level, pressure, mode, alarms, and
     actuator state.
+- `install_agentic_modbus_hook` can wrap an initialized Conpot `ModbusServer`
+  databank. The hook observes raw Modbus TCP requests, runs the agent runtime,
+  sends a validated generated frame when available, and otherwise falls back to
+  Conpot's deterministic response path.
 
 Default Conpot DataBus keys:
 
@@ -90,6 +94,14 @@ $env:PYTHONPATH = "src;..\conpot-main\conpot-main"
 python tools\smoke_modbus_tcp.py
 ```
 
+This smoke script starts Conpot, installs the agentic Modbus databank hook, and
+demonstrates a generated Modbus TCP response:
+
+```powershell
+$env:PYTHONPATH = "src;..\conpot-main\conpot-main"
+python tools\smoke_agentic_modbus_hook.py
+```
+
 The agent smoke uses the no-LLM planner by default and writes sample events to
 `records/agent_smoke_events.jsonl`. It also demonstrates accepted world patches
 and a local generated Modbus TCP response candidate:
@@ -101,6 +113,11 @@ python tools\replay_events.py records\agent_smoke_events.jsonl
 
 To call the configured OpenAI-compatible endpoint from `.env`, pass
 `--live-llm`. The expected keys are `OpenAIBaseURL` and `APIKey`; optional model
-keys are `OpenAIModel`, `OPENAI_MODEL`, or `LLM_MODEL`.
+keys are `OpenAIModel`, `OPENAI_MODEL`, or `LLM_MODEL`. `OpenAIBaseURL` can point
+to either a chat-completions endpoint root or a `/v1` root; the client tries both
+`/chat/completions` and `/v1/chat/completions` when needed. If the endpoint does
+not serve the default `gpt-4o-mini` model, set `OpenAIModel` explicitly.
+For one-off diagnostics, use `--model <name>` with either smoke script instead
+of editing `.env`.
 
 See `docs/architecture.md` for component boundaries and the implementation order.

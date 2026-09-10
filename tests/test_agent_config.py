@@ -3,7 +3,11 @@ import unittest
 from pathlib import Path
 
 from agentic_plc.agent.config import LLMConfig, load_dotenv_values
-from agentic_plc.agent.planner import completion_url, parse_json_object
+from agentic_plc.agent.planner import (
+    completion_url,
+    completion_url_candidates,
+    parse_json_object,
+)
 
 
 class AgentConfigTests(unittest.TestCase):
@@ -39,6 +43,13 @@ class AgentConfigTests(unittest.TestCase):
         self.assertEqual(
             completion_url("https://example.test/v1"),
             "https://example.test/v1/chat/completions",
+        )
+        self.assertEqual(
+            completion_url_candidates("https://example.test"),
+            [
+                "https://example.test/chat/completions",
+                "https://example.test/v1/chat/completions",
+            ],
         )
 
     def test_parse_json_object_accepts_markdown_fence(self) -> None:

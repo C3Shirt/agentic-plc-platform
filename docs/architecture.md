@@ -43,6 +43,9 @@ Gate: a coil or setpoint write causes repeatable sensor and alarm changes.
 Current status: the tank-pump register map and a Conpot DataBus adapter exist.
 The adapter exposes dynamic register blocks instead of plain lists, because
 Conpot's Modbus mediator mutates DataBus block objects directly during writes.
+An optional `AgenticModbusDatabank` hook can wrap Conpot's initialized Modbus
+databank and replace a deterministic response with a validated generated Modbus
+TCP frame.
 
 ### P2 - Unified telemetry
 
@@ -80,6 +83,10 @@ OpenAI-compatible planner configured from `.env`. The controller validates
 deception plans, generated Modbus TCP reply frames, and bounded world patches. If
 constructed with a `TankPumpWorld`, it applies accepted world patches and records
 the before/after snapshots in the decision object.
+
+The first Conpot integration point is `install_agentic_modbus_hook`, which
+wraps the decorated Conpot `ModbusServer.wrapped._databank` object rather than
+modifying upstream Conpot files.
 
 ### P5 - Evaluation
 

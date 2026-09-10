@@ -7,6 +7,7 @@ from agentic_plc.agent.planner import (
     RuleBasedDeceptionPlanner,
     proposal_from_payload,
 )
+from agentic_plc.agent.runtime import AgentRuntime, AgentRuntimeConfig
 from agentic_plc.contracts.actions import (
     AgentProposal,
     ProtocolReply,
@@ -18,6 +19,8 @@ __all__ = [
     "AgentController",
     "AgentDecision",
     "AgentProposal",
+    "AgentRuntime",
+    "AgentRuntimeConfig",
     "DeceptionPlanner",
     "LLMConfig",
     "OpenAICompatiblePlanner",
