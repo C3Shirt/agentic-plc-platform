@@ -22,4 +22,5 @@ Smoke check after installing Conpot dependencies:
 ```powershell
 $env:PYTHONPATH = "src;..\conpot-main\conpot-main"
 python tools\smoke_conpot_template.py
+python tools\smoke_modbus_tcp.py
 ```

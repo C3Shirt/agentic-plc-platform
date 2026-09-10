@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from agentic_plc.adapters.conpot_databus import get_shared_tank_pump_runtime
 
 
 def main() -> int:
+    repo_root = Path(__file__).resolve().parents[1]
+    os.chdir(repo_root)
+    (repo_root / "tests" / "data" / "data_temp_fs").mkdir(
+        parents=True, exist_ok=True
+    )
+
     try:
         import conpot.core as conpot_core
         from conpot.protocols.modbus.modbus_server import ModbusServer
@@ -13,9 +20,7 @@ def main() -> int:
         print(f"missing Conpot runtime dependency: {exc.name}")
         return 2
 
-    template_dir = (
-        Path(__file__).resolve().parents[1] / "integrations" / "conpot" / "tank_pump"
-    )
+    template_dir = repo_root / "integrations" / "conpot" / "tank_pump"
     conpot_core.get_databus().initialize(str(template_dir / "template.xml"))
     ModbusServer(
         template=str(template_dir / "modbus" / "modbus.xml"),

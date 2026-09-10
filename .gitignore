@@ -9,4 +9,4 @@ build/
 *.egg-info/
 .env
 records/
-
+tests/data/data_temp_fs/

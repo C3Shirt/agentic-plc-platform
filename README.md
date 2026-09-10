@@ -69,4 +69,12 @@ $env:PYTHONPATH = "src;..\conpot-main\conpot-main"
 python tools\smoke_conpot_template.py
 ```
 
+This smoke script starts a local Conpot Modbus TCP service on an ephemeral port
+and drives it with a Modbus client:
+
+```powershell
+$env:PYTHONPATH = "src;..\conpot-main\conpot-main"
+python tools\smoke_modbus_tcp.py
+```
+
 See `docs/architecture.md` for component boundaries and the implementation order.
