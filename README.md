@@ -9,19 +9,24 @@ designed to sit beside, rather than inside, the two reference projects:
 
 ## Initial scope
 
-The first milestone is a deterministic tank-pump process shared by Modbus and an
-HTTP HMI. SSH and LLM-driven deception planning are added only after the world
-model, event contract, and protocol consistency tests pass.
+The first milestone is a tank-pump process shared by Modbus and an HTTP HMI.
+The deterministic path remains the fallback baseline. The agentic path can add
+LLM-generated protocol replies and bounded world-state mutations after validation.
 
 ```text
 request -> protocol adapter -> normalized event -> policy -> world transition
                                                      |
-                                      deterministic protocol response
+                           deterministic or validated generated response
 
-normalized events -> asynchronous agent -> typed deception plan -> validator
+normalized events -> asynchronous agent -> AgentProposal envelope
+                                      |-> deception_plan -> validator
+                                      |-> protocol_reply -> frame validator
+                                      |-> world_patch    -> range/schema validator -> world
 ```
 
-The online protocol path never waits for an LLM.
+The online protocol path can run without an LLM. If an adapter chooses to use
+generated replies online, it should enforce short timeouts and fall back to the
+deterministic response path.
 
 ## Current implementation
 
@@ -33,6 +38,14 @@ The online protocol path never waits for an LLM.
   converted back into validated world transitions.
 - `InMemoryEventLog` records accepted and rejected register writes with the
   normalized `ICSEvent` contract.
+- `JsonlEventStore` persists normalized events for replay and offline analysis.
+- `AgentController` runs a bounded action pass over events. It can use a no-LLM
+  rule planner or an OpenAI-compatible planner loaded from `.env`.
+- `AgentProposal` supports three validated outputs:
+  - `deception_plan`: adjust lures, maintenance notes, and exposed artifacts.
+  - `protocol_reply`: generated Modbus TCP response bytes in hex.
+  - `world_patch`: bounded mutations to tank level, pressure, mode, alarms, and
+    actuator state.
 
 Default Conpot DataBus keys:
 
@@ -76,5 +89,18 @@ and drives it with a Modbus client:
 $env:PYTHONPATH = "src;..\conpot-main\conpot-main"
 python tools\smoke_modbus_tcp.py
 ```
+
+The agent smoke uses the no-LLM planner by default and writes sample events to
+`records/agent_smoke_events.jsonl`. It also demonstrates accepted world patches
+and a local generated Modbus TCP response candidate:
+
+```powershell
+python tools\smoke_agent_controller.py
+python tools\replay_events.py records\agent_smoke_events.jsonl
+```
+
+To call the configured OpenAI-compatible endpoint from `.env`, pass
+`--live-llm`. The expected keys are `OpenAIBaseURL` and `APIKey`; optional model
+keys are `OpenAIModel`, `OPENAI_MODEL`, or `LLM_MODEL`.
 
 See `docs/architecture.md` for component boundaries and the implementation order.

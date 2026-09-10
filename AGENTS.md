@@ -6,10 +6,12 @@ explicitly calls for an adapter patch.
 
 ## Architecture rules
 
-- Keep protocol parsing and responses deterministic.
+- Keep deterministic protocol behavior as the fallback and regression baseline.
 - Keep the global plant state separate from per-connection and per-actor context.
-- An LLM may propose a typed plan but may not emit protocol bytes or mutate state directly.
-- Validate every proposed plan before applying it.
+- An LLM may generate protocol response bytes and world-model patches, but only
+  through the typed `AgentProposal` envelope.
+- Validate every generated protocol reply, deception plan, and world patch before
+  applying or sending it.
 - Preserve a no-LLM fallback path for every online interaction.
 - Do not connect the honeypot to a real PLC or production network.
 
@@ -23,4 +25,3 @@ python -m pytest
 Use `src/agentic_plc/contracts` for cross-component schemas, `world` for the
 deterministic process model, `policy` for validation, and `adapters` for narrow
 integration with exposed services.
-

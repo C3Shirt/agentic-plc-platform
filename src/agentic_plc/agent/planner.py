@@ -1,0 +1,340 @@
+from __future__ import annotations
+
+import json
+import re
+import urllib.error
+import urllib.request
+from typing import Protocol
+
+from agentic_plc.agent.config import LLMConfig
+from agentic_plc.contracts.actions import (
+    AgentProposal,
+    ProtocolReply,
+    WorldPatch,
+    WorldPatchOperation,
+)
+from agentic_plc.contracts.events import DeceptionPlan, ICSEvent, Intent
+from agentic_plc.protocols.modbus import build_modbus_tcp_read_registers_response
+from agentic_plc.telemetry.serialization import event_to_dict
+
+
+class PlannerResponseError(RuntimeError):
+    """Raised when an LLM planner returns an unusable plan."""
+
+
+class DeceptionPlanner(Protocol):
+    def propose(self, events: list[ICSEvent]) -> AgentProposal | DeceptionPlan | None:
+        raise NotImplementedError
+
+
+class RuleBasedDeceptionPlanner:
+    """No-LLM baseline planner for tests, fallback, and offline operation."""
+
+    def propose(self, events: list[ICSEvent]) -> AgentProposal | None:
+        if not events:
+            return None
+
+        actor_id = self._actor_id(events)
+        intents = [event.intent for event in events]
+        latest = events[-1]
+
+        if latest.intent is Intent.READ_PROCESS and latest.transaction_id:
+            unit_id = latest.unit_id if latest.unit_id is not None else 1
+            return AgentProposal(
+                protocol_reply=ProtocolReply(
+                    protocol="modbus_tcp",
+                    transaction_id=str(latest.transaction_id),
+                    unit_id=unit_id,
+                    payload_hex=build_modbus_tcp_read_registers_response(
+                        transaction_id=int(str(latest.transaction_id), 0),
+                        unit_id=unit_id,
+                        function_code=3,
+                        values=[500, 120],
+                    ),
+                    reason="Return a plausible generated Modbus process snapshot.",
+                )
+            )
+
+        if Intent.FILE_TRANSFER in intents:
+            return AgentProposal(
+                deception_plan=DeceptionPlan(
+                    actor_id=actor_id,
+                    action="expose_existing_artifact",
+                    target="logic_backups/tank_pump_v1.st",
+                    reason="Actor attempted file transfer; expose a plausible PLC logic backup.",
+                    ttl_seconds=900,
+                )
+            )
+
+        if intents.count(Intent.WRITE_SETPOINT) >= 2:
+            return AgentProposal(
+                deception_plan=DeceptionPlan(
+                    actor_id=actor_id,
+                    action="publish_maintenance_note",
+                    target="WO-2048",
+                    reason="Repeated setpoint writes suggest process-tuning interest.",
+                    ttl_seconds=900,
+                    parameters={"topic": "level loop tuning"},
+                ),
+                world_patch=WorldPatch(
+                    actor_id=actor_id,
+                    reason="Show a plausible delayed process response after repeated setpoint tuning.",
+                    ttl_seconds=120,
+                    operations=[
+                        WorldPatchOperation(
+                            path="level_percent",
+                            value=58.5,
+                            reason="Keep the process close enough to the new setpoint to sustain interaction.",
+                        )
+                    ],
+                ),
+            )
+
+        probing_count = intents.count(Intent.INVALID_ADDRESS) + intents.count(
+            Intent.UNSUPPORTED_OPERATION
+        )
+        if probing_count >= 3:
+            return AgentProposal(
+                deception_plan=DeceptionPlan(
+                    actor_id=actor_id,
+                    action="expose_existing_artifact",
+                    target="docs/register_map_excerpt.txt",
+                    reason="Repeated probing indicates register-map discovery behavior.",
+                    ttl_seconds=600,
+                )
+            )
+
+        if Intent.AUTH_ATTEMPT in intents:
+            return AgentProposal(
+                deception_plan=DeceptionPlan(
+                    actor_id=actor_id,
+                    action="adjust_noncritical_narrative",
+                    target="maintenance_gateway_banner",
+                    reason="Authentication activity suggests interest in maintenance access.",
+                    ttl_seconds=300,
+                )
+            )
+
+        return None
+
+    def _actor_id(self, events: list[ICSEvent]) -> str:
+        for event in reversed(events):
+            if event.actor_id:
+                return event.actor_id
+        return f"ip:{events[-1].source_ip}"
+
+
+class OpenAICompatiblePlanner:
+    """Planner for OpenAI-compatible chat-completions APIs."""
+
+    ALLOWED_ACTIONS = (
+        "expose_existing_artifact",
+        "publish_maintenance_note",
+        "select_existing_fault_scenario",
+        "adjust_noncritical_narrative",
+    )
+
+    def __init__(self, config: LLMConfig) -> None:
+        if not config.is_configured:
+            raise ValueError("LLM planner requires base_url and api_key")
+        self._config = config
+
+    def propose(self, events: list[ICSEvent]) -> AgentProposal | None:
+        if not events:
+            return None
+
+        payload = {
+            "model": self._config.model,
+            "temperature": 0.1,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": self._system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "events": [
+                                self._compact_event(event) for event in events[-20:]
+                            ]
+                        },
+                        sort_keys=True,
+                    ),
+                },
+            ],
+        }
+        response = self._post_json(payload)
+        content = response["choices"][0]["message"]["content"]
+        plan_payload = parse_json_object(content)
+        if plan_payload.get("action") in {None, "", "none"} and not any(
+            key in plan_payload
+            for key in ("deception_plan", "protocol_reply", "protocol_response", "world_patch")
+        ):
+            return None
+        return proposal_from_payload(plan_payload)
+
+    def _post_json(self, payload: dict[str, object]) -> dict[str, object]:
+        body = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            url=completion_url(self._config.base_url or ""),
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self._config.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=self._config.timeout_seconds
+            ) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise PlannerResponseError(f"LLM planner request failed: {exc}") from exc
+
+    def _system_prompt(self) -> str:
+        allowed = ", ".join(self.ALLOWED_ACTIONS)
+        return (
+            "You are an agent controller for an ICS honeypot. Return only one JSON "
+            "object. You may propose deception actions, generated Modbus TCP response "
+            "bytes, and bounded world-model state patches. All proposals are validated "
+            "before use. Do not output shell commands, exploit steps, or prose outside "
+            "the JSON object. "
+            f"Allowed actions: {allowed}. "
+            "Preferred schema: {deception_plan, protocol_reply, world_patch}. "
+            "deception_plan fields: actor_id, action, target, reason, ttl_seconds, "
+            "parameters. protocol_reply fields: protocol, payload_hex, reason, "
+            "transaction_id, unit_id, metadata. Use protocol 'modbus_tcp'. "
+            "world_patch fields: actor_id, reason, ttl_seconds, operations; each "
+            "operation has path, value, reason. Allowed paths: level_percent, "
+            "pressure_bar, level_setpoint_percent, inlet_valve_open, "
+            "outlet_pump_running, high_level_alarm, mode. Use null fields or action "
+            "'none' if no change is warranted."
+        )
+
+    def _compact_event(self, event: ICSEvent) -> dict[str, object]:
+        data = event_to_dict(event)
+        keep = {
+            "protocol",
+            "session_id",
+            "source_ip",
+            "actor_id",
+            "intent",
+            "operation",
+            "address",
+            "count",
+            "requested_value",
+            "result",
+            "world_revision",
+        }
+        return {key: data[key] for key in keep if key in data}
+
+
+def completion_url(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/chat/completions"):
+        return base
+    return f"{base}/chat/completions"
+
+
+def parse_json_object(text: str) -> dict[str, object]:
+    stripped = text.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", stripped, flags=re.S)
+    if fenced:
+        stripped = fenced.group(1).strip()
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise PlannerResponseError("LLM planner did not return JSON") from exc
+    if not isinstance(payload, dict):
+        raise PlannerResponseError("LLM planner JSON must be an object")
+    return payload
+
+
+def proposal_from_payload(payload: dict[str, object]) -> AgentProposal | None:
+    deception_payload = payload.get("deception_plan")
+    if deception_payload is None and payload.get("action") not in {None, "", "none"}:
+        deception_payload = payload
+
+    protocol_payload = payload.get("protocol_reply")
+    if protocol_payload is None:
+        protocol_payload = payload.get("protocol_response")
+
+    world_payload = payload.get("world_patch")
+
+    deception_plan = (
+        _parse_deception_plan(deception_payload)
+        if isinstance(deception_payload, dict)
+        else None
+    )
+    protocol_reply = (
+        _parse_protocol_reply(protocol_payload)
+        if isinstance(protocol_payload, dict)
+        else None
+    )
+    world_patch = (
+        _parse_world_patch(world_payload) if isinstance(world_payload, dict) else None
+    )
+
+    if deception_plan is None and protocol_reply is None and world_patch is None:
+        return None
+    return AgentProposal(
+        deception_plan=deception_plan,
+        protocol_reply=protocol_reply,
+        world_patch=world_patch,
+    )
+
+
+def _parse_deception_plan(payload: dict[str, object]) -> DeceptionPlan | None:
+    if payload.get("action") in {None, "", "none"}:
+        return None
+    return DeceptionPlan(
+        actor_id=str(payload["actor_id"]),
+        action=str(payload["action"]),
+        target=str(payload["target"]),
+        reason=str(payload["reason"]),
+        ttl_seconds=int(payload.get("ttl_seconds", 300)),
+        parameters=dict(payload.get("parameters", {})),
+    )
+
+
+def _parse_protocol_reply(payload: dict[str, object]) -> ProtocolReply | None:
+    payload_hex = payload.get("payload_hex")
+    if payload_hex in {None, "", "none"}:
+        return None
+    return ProtocolReply(
+        protocol=str(payload.get("protocol", "modbus_tcp")),
+        payload_hex=str(payload_hex),
+        reason=str(payload["reason"]),
+        transaction_id=(
+            None
+            if payload.get("transaction_id") is None
+            else str(payload.get("transaction_id"))
+        ),
+        unit_id=None if payload.get("unit_id") is None else int(payload["unit_id"]),
+        metadata=dict(payload.get("metadata", {})),
+    )
+
+
+def _parse_world_patch(payload: dict[str, object]) -> WorldPatch | None:
+    operations_payload = payload.get("operations")
+    if not operations_payload:
+        return None
+    if not isinstance(operations_payload, list):
+        raise PlannerResponseError("world_patch.operations must be a list")
+    return WorldPatch(
+        actor_id=str(payload["actor_id"]),
+        reason=str(payload["reason"]),
+        ttl_seconds=int(payload.get("ttl_seconds", 300)),
+        operations=[
+            WorldPatchOperation(
+                path=str(operation["path"]),
+                value=operation.get("value"),
+                reason=str(operation.get("reason", "")),
+            )
+            for operation in operations_payload
+            if isinstance(operation, dict)
+        ],
+        metadata=dict(payload.get("metadata", {})),
+    )
