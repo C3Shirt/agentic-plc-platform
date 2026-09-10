@@ -11,9 +11,10 @@
    contract.
 3. **Policy engine** validates protocol writes, agent-proposed deception plans,
    generated protocol replies, and world patches.
-4. **Agent controller** classifies actor trajectories and proposes typed
-   `AgentProposal` envelopes. A failed or missing agent falls back to deterministic
-   protocol behavior.
+4. **Process-aware agent controller** classifies actor trajectories and proposes
+   typed `AgentProposal` envelopes from normalized events plus the active
+   physical-process context. A failed or missing agent falls back to
+   deterministic protocol behavior.
 5. **SSH maintenance gateway** has per-session shell state but reads the same global
    plant state as Conpot.
 6. **Telemetry** stores immutable events with connection, actor, protocol, address,
@@ -103,6 +104,12 @@ OpenAI-compatible planner configured from `.env`. The controller validates
 deception plans, generated Modbus TCP reply frames, and bounded world patches. If
 constructed with a `TankPumpWorld`, it applies accepted world patches and records
 the before/after snapshots in the decision object.
+
+The controller can also receive a `PhysicalProcessContext`. In that mode the
+agent sees the active backend type, snapshot, PLC area, exposed protocol points,
+and writable process-variable ids. Rule-based fallback replies can therefore be
+generated from TE or any future scenario-mapped process backend, not from a
+tank-specific constant response.
 
 The first Conpot integration point is `install_agentic_modbus_hook`. With the
 local Conpot request-hook patch applied, it registers a hook through

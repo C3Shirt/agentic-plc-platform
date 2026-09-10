@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from agentic_plc.agent.process_context import PhysicalProcessContext
 from agentic_plc.agent.planner import DeceptionPlanner, RuleBasedDeceptionPlanner
 from agentic_plc.contracts.actions import AgentProposal, ProtocolReply, WorldPatch
 from agentic_plc.contracts.events import DeceptionPlan, ICSEvent
 from agentic_plc.policy.plan_validator import DeceptionPlanValidator
 from agentic_plc.policy.protocol_reply_validator import ProtocolReplyValidator
+from agentic_plc.processes import ProcessPatchApplier
 from agentic_plc.world.model import TankPumpWorld
 from agentic_plc.world.patch import AppliedWorldPatch, WorldPatchApplier
 
@@ -40,7 +42,9 @@ class AgentController:
         validator: DeceptionPlanValidator | None = None,
         protocol_reply_validator: ProtocolReplyValidator | None = None,
         world_patch_applier: WorldPatchApplier | None = None,
+        process_patch_applier: ProcessPatchApplier | None = None,
         world: TankPumpWorld | None = None,
+        process_context: PhysicalProcessContext | None = None,
     ) -> None:
         self._planner = planner or RuleBasedDeceptionPlanner()
         self._validator = validator or DeceptionPlanValidator()
@@ -48,11 +52,15 @@ class AgentController:
             protocol_reply_validator or ProtocolReplyValidator()
         )
         self._world_patch_applier = world_patch_applier or WorldPatchApplier()
+        self._process_patch_applier = process_patch_applier or ProcessPatchApplier()
         self._world = world
+        self._process_context = process_context
 
     def run_once(self, events: Iterable[ICSEvent]) -> AgentDecision:
         event_list = list(events)
-        proposal = _normalize_proposal(self._planner.propose(event_list))
+        proposal = _normalize_proposal(
+            _call_planner(self._planner, event_list, self._process_context)
+        )
         if proposal is None:
             return AgentDecision()
 
@@ -93,11 +101,30 @@ class AgentController:
                 protocol_replies.append(proposal.protocol_reply)
 
         if proposal.world_patch is not None:
-            if self._world is None:
+            if self._process_context is not None:
+                try:
+                    world_patches.append(
+                        self._process_patch_applier.apply(
+                            self._process_context.backend,
+                            proposal.world_patch,
+                        )
+                    )
+                except ValueError as exc:
+                    rejected.append(
+                        RejectedPlan(
+                            plan=proposal.world_patch,
+                            error=str(exc),
+                            kind="world_patch",
+                        )
+                    )
+            elif self._world is None:
                 rejected.append(
                     RejectedPlan(
                         plan=proposal.world_patch,
-                        error="world patch requires AgentController(world=...)",
+                        error=(
+                            "world patch requires AgentController(world=...) or "
+                            "AgentController(process_context=...)"
+                        ),
                         kind="world_patch",
                     )
                 )
@@ -134,3 +161,17 @@ def _normalize_proposal(
     if isinstance(proposal, DeceptionPlan):
         return AgentProposal(deception_plan=proposal)
     return proposal
+
+
+def _call_planner(
+    planner: DeceptionPlanner,
+    events: list[ICSEvent],
+    context: PhysicalProcessContext | None,
+) -> AgentProposal | DeceptionPlan | None:
+    try:
+        return planner.propose(events, context)
+    except TypeError as exc:
+        try:
+            return planner.propose(events)  # type: ignore[call-arg]
+        except TypeError:
+            raise exc

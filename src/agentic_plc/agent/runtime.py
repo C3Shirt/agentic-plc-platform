@@ -5,6 +5,7 @@ from typing import Iterable, Protocol
 
 from agentic_plc.agent.controller import AgentController, AgentDecision
 from agentic_plc.agent.planner import DeceptionPlanner, RuleBasedDeceptionPlanner
+from agentic_plc.agent.process_context import PhysicalProcessContext
 from agentic_plc.contracts.events import ICSEvent
 from agentic_plc.world.model import TankPumpWorld
 
@@ -26,7 +27,8 @@ class AgentRuntimeConfig:
 class AgentRuntime:
     """Small runtime that connects event intake to validated agent actions."""
 
-    world: TankPumpWorld
+    world: TankPumpWorld | None = None
+    process_context: PhysicalProcessContext | None = None
     planner: DeceptionPlanner = field(default_factory=RuleBasedDeceptionPlanner)
     event_store: EventStoreLike | None = None
     config: AgentRuntimeConfig = field(default_factory=AgentRuntimeConfig)
@@ -38,7 +40,11 @@ class AgentRuntime:
 
     def decide(self, events: Iterable[ICSEvent]) -> AgentDecision:
         event_list = list(events)[-self.config.decision_window :]
-        decision = AgentController(self.planner, world=self.world).run_once(event_list)
+        decision = AgentController(
+            self.planner,
+            world=self.world,
+            process_context=self.process_context,
+        ).run_once(event_list)
         self.decisions.append(decision)
         return decision
 

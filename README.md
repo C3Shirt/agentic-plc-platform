@@ -44,7 +44,9 @@ deterministic response path.
   normalized `ICSEvent` contract.
 - `JsonlEventStore` persists normalized events for replay and offline analysis.
 - `AgentController` runs a bounded action pass over events. It can use a no-LLM
-  rule planner or an OpenAI-compatible planner loaded from `.env`.
+  rule planner or an OpenAI-compatible planner loaded from `.env`. When supplied
+  with `PhysicalProcessContext`, the same generic agent sees the active process
+  backend, current snapshot, exposed PLC points, and writable process variables.
 - `AgentProposal` supports three validated outputs:
   - `deception_plan`: adjust lures, maintenance notes, and exposed artifacts.
   - `protocol_reply`: generated Modbus TCP response bytes in hex.
@@ -115,6 +117,7 @@ stack and can be checked with:
 $env:PYTHONPATH = "src;..\conpot-main\conpot-main"
 python tools\smoke_conpot_te_template.py
 python tools\smoke_te_modbus_tcp.py
+python tools\smoke_process_aware_modbus_hook.py
 ```
 
 This smoke script starts Conpot, installs the agentic Modbus databank hook, and
@@ -139,6 +142,7 @@ Download and smoke-test the Tennessee Eastman trace backend:
 $env:PYTHONPATH = "src"
 python tools\download_tennessee_eastman.py --idv idv1
 python tools\smoke_te_backend.py
+python tools\smoke_process_aware_agent.py
 ```
 
 The agent smoke uses the no-LLM planner by default and writes sample events to

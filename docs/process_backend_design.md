@@ -4,7 +4,7 @@ The honeypot should not bind a PLC protocol implementation to one physical
 process simulator. The intended boundary is:
 
 ```text
-ProtocolAdapter -> ScenarioMapping -> ProcessBackend -> AgentRuntime
+ProtocolAdapter -> ScenarioMapping -> ProcessBackend -> PhysicalProcessContext -> AgentRuntime
 ```
 
 ## Contracts
@@ -21,6 +21,10 @@ ProtocolAdapter -> ScenarioMapping -> ProcessBackend -> AgentRuntime
   than through simulator-specific column numbers.
 - `AgentRuntime` can observe protocol events and propose generated replies or
   world patches. The backend remains the state authority after validation.
+- `PhysicalProcessContext` is what makes the agent generic. It describes the
+  active process type, current snapshot, PLC-facing points, scaling, access mode,
+  and writable variable ids. The agent should infer behavior from this context
+  instead of relying on TE-specific or tank-pump-specific code paths.
 
 ## Backend families
 
@@ -63,6 +67,22 @@ PLC slice:
 This is a deliberately partial PLC view of the full TE plant. An attacker sees a
 coherent industrial control cell, while the backend can still advance against the
 larger process trace.
+
+## Generic process-aware agent
+
+The agent should be described as process-aware, not TE-aware. TE is only one
+loaded backend. At runtime the planner receives:
+
+- recent normalized `ICSEvent` records;
+- a `PhysicalProcessContext` with `process_id`, backend name, scenario id, PLC
+  area, snapshot revision, simulation time, exposed process points, and writable
+  variable ids;
+- optional protocol/register mapping helpers for deterministic fallback or
+  validation.
+
+For read requests, a planner can generate protocol replies from the current
+snapshot and scenario mapping. For state changes, patches are accepted only when
+they target writable backend variables and pass backend bounds.
 
 ## Runtime write semantics for traces
 

@@ -1,5 +1,6 @@
 from agentic_plc.agent.config import LLMConfig, load_dotenv_values
 from agentic_plc.agent.controller import AgentController, AgentDecision, RejectedPlan
+from agentic_plc.agent.process_context import ExposedProcessPoint, PhysicalProcessContext
 from agentic_plc.agent.planner import (
     DeceptionPlanner,
     OpenAICompatiblePlanner,
@@ -22,10 +23,12 @@ __all__ = [
     "AgentRuntime",
     "AgentRuntimeConfig",
     "DeceptionPlanner",
+    "ExposedProcessPoint",
     "LLMConfig",
     "OpenAICompatiblePlanner",
     "PlannerResponseError",
     "ProtocolReply",
+    "PhysicalProcessContext",
     "RejectedPlan",
     "RuleBasedDeceptionPlanner",
     "WorldPatch",

@@ -67,4 +67,5 @@ python tools\smoke_modbus_tcp.py
 python tools\smoke_agentic_modbus_hook.py
 python tools\smoke_conpot_te_template.py
 python tools\smoke_te_modbus_tcp.py
+python tools\smoke_process_aware_modbus_hook.py
 ```

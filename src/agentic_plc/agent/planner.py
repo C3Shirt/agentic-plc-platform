@@ -8,6 +8,7 @@ import urllib.request
 from typing import Protocol
 
 from agentic_plc.agent.config import LLMConfig
+from agentic_plc.agent.process_context import PhysicalProcessContext
 from agentic_plc.contracts.actions import (
     AgentProposal,
     ProtocolReply,
@@ -24,14 +25,22 @@ class PlannerResponseError(RuntimeError):
 
 
 class DeceptionPlanner(Protocol):
-    def propose(self, events: list[ICSEvent]) -> AgentProposal | DeceptionPlan | None:
+    def propose(
+        self,
+        events: list[ICSEvent],
+        context: PhysicalProcessContext | None = None,
+    ) -> AgentProposal | DeceptionPlan | None:
         raise NotImplementedError
 
 
 class RuleBasedDeceptionPlanner:
     """No-LLM baseline planner for tests, fallback, and offline operation."""
 
-    def propose(self, events: list[ICSEvent]) -> AgentProposal | None:
+    def propose(
+        self,
+        events: list[ICSEvent],
+        context: PhysicalProcessContext | None = None,
+    ) -> AgentProposal | None:
         if not events:
             return None
 
@@ -45,7 +54,9 @@ class RuleBasedDeceptionPlanner:
             if function_code not in {3, 4}:
                 function_code = 3
             count = int(latest.count or 2)
-            values = ([500, 120] + [0] * max(0, count - 2))[:count]
+            values = self._process_values_for_read(context, latest)
+            if values is None:
+                values = ([500, 120] + [0] * max(0, count - 2))[:count]
             return AgentProposal(
                 protocol_reply=ProtocolReply(
                     protocol="modbus_tcp",
@@ -129,6 +140,18 @@ class RuleBasedDeceptionPlanner:
                 return event.actor_id
         return f"ip:{events[-1].source_ip}"
 
+    def _process_values_for_read(
+        self,
+        context: PhysicalProcessContext | None,
+        event: ICSEvent,
+    ) -> list[int] | None:
+        if context is None:
+            return None
+        try:
+            return context.values_for_modbus_event(event)
+        except ValueError:
+            return None
+
 
 class OpenAICompatiblePlanner:
     """Planner for OpenAI-compatible chat-completions APIs."""
@@ -145,7 +168,11 @@ class OpenAICompatiblePlanner:
             raise ValueError("LLM planner requires base_url and api_key")
         self._config = config
 
-    def propose(self, events: list[ICSEvent]) -> AgentProposal | None:
+    def propose(
+        self,
+        events: list[ICSEvent],
+        context: PhysicalProcessContext | None = None,
+    ) -> AgentProposal | None:
         if not events:
             return None
 
@@ -160,7 +187,7 @@ class OpenAICompatiblePlanner:
                 },
                 {
                     "role": "user",
-                    "content": self._user_prompt(events),
+                    "content": self._user_prompt(events, context),
                 },
             ],
         }
@@ -213,19 +240,44 @@ class OpenAICompatiblePlanner:
     def _system_prompt(self) -> str:
         return "Return only compact valid JSON. No markdown. No prose."
 
-    def _user_prompt(self, events: list[ICSEvent]) -> str:
+    def _user_prompt(
+        self,
+        events: list[ICSEvent],
+        context: PhysicalProcessContext | None = None,
+    ) -> str:
         compact_events = [self._compact_event(event) for event in events[-8:]]
+        context_payload = context.to_prompt_dict() if context else None
+        writable_paths = (
+            context.writable_variable_ids()
+            if context
+            else [
+                "level_percent",
+                "pressure_bar",
+                "level_setpoint_percent",
+                "inlet_valve_open",
+                "outlet_pump_running",
+                "high_level_alarm",
+                "mode",
+            ]
+        )
         return (
-            "You control a tank-pump simulator. Return one JSON object with "
-            "keys deception_plan, protocol_reply, world_patch. Use null for "
-            "unused keys. For read_process Modbus events, you may return "
-            "protocol_reply with protocol=modbus_tcp, payload_hex, reason, "
-            "transaction_id, unit_id. For repeated write_setpoint events, return "
-            "deception_plan action=publish_maintenance_note and optionally a "
-            "world_patch using only level_percent, pressure_bar, "
-            "level_setpoint_percent, inlet_valve_open, outlet_pump_running, "
-            "high_level_alarm, mode. Events: "
-            + json.dumps({"events": compact_events}, sort_keys=True)
+            "You are a generic process-aware controller for an ICS honeypot. "
+            "Infer the active physical process from process_context. Return one "
+            "JSON object with keys deception_plan, protocol_reply, world_patch. "
+            "Use null for unused keys. Base protocol replies on the current "
+            "snapshot and exposed PLC points. For Modbus read_process events, "
+            "protocol_reply must use protocol=modbus_tcp and include payload_hex, "
+            "reason, transaction_id, unit_id. World patches may only use path "
+            "values from allowed_world_patch_paths. Do not invent unmapped PLC "
+            "addresses. Payload: "
+            + json.dumps(
+                {
+                    "allowed_world_patch_paths": writable_paths,
+                    "events": compact_events,
+                    "process_context": context_payload,
+                },
+                sort_keys=True,
+            )
         )
 
     def _compact_event(self, event: ICSEvent) -> dict[str, object]:
