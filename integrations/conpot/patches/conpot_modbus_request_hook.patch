@@ -1,0 +1,75 @@
+diff --git a/conpot/protocols/modbus/modbus_server.py b/conpot/protocols/modbus/modbus_server.py
+--- a/conpot/protocols/modbus/modbus_server.py
++++ b/conpot/protocols/modbus/modbus_server.py
+@@ -30,6 +30,7 @@ class ModbusServer(modbus.Server):
+         self.host = None
+         self.port = None
+         self.server = None
++        self.request_hook = None
+ 
+         databank = slave_db.SlaveBase(template)
+ 
+@@ -90,6 +91,52 @@ class ModbusServer(modbus.Server):
+         except Exception as e:
+             logger.error(e)
+ 
++    def set_request_hook(self, hook):
++        self.request_hook = hook
++
++    def _request_context(self, session, address, sock):
++        local_address = sock.getsockname()
++        return {
++            "protocol": "modbus",
++            "session_id": session.id,
++            "source_ip": address[0],
++            "source_port": address[1],
++            "destination_ip": local_address[0],
++            "destination_port": local_address[1],
++        }
++
++    def _handle_request(self, query, request, session, address, sock):
++        hook = getattr(self, "request_hook", None)
++        if hook is not None:
++            context = self._request_context(session, address, sock)
++            try:
++                hook_result = hook(
++                    query=query,
++                    request=request,
++                    mode=self.mode,
++                    context=context,
++                )
++                if hook_result is not None:
++                    if isinstance(hook_result, tuple) and len(hook_result) == 2:
++                        return hook_result
++                    logger.warning(
++                        "Modbus request hook returned an invalid result; "
++                        "falling back to default handling. (%s)",
++                        session.id,
++                    )
++            except Exception as e:
++                logger.exception(
++                    "Modbus request hook failed; falling back to default handling. (%s)",
++                    session.id,
++                )
++                response, logdata = self._databank.handle_request(
++                    query, request, self.mode
++                )
++                logdata["request_hook_error"] = str(e)
++                return response, logdata
++
++        return self._databank.handle_request(query, request, self.mode)
++
+     def handle(self, sock, address):
+         sock.settimeout(self.timeout)
+ 
+@@ -191,8 +238,8 @@ class ModbusServer(modbus.Server):
+                 # logdata is a dictionary containing request, slave_id,
+                 # function_code and response
+                 try:
+-                    response, logdata = self._databank.handle_request(
+-                        query, request, self.mode
++                    response, logdata = self._handle_request(
++                        query, request, session, address, sock
+                     )
+                 except modbus_tcp.ModbusInvalidMbapError as e:
+                     logger.info(

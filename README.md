@@ -50,6 +50,8 @@ deterministic response path.
   databank. The hook observes raw Modbus TCP requests, runs the agent runtime,
   sends a validated generated frame when available, and otherwise falls back to
   Conpot's deterministic response path.
+  Apply `integrations/conpot/patches/conpot_modbus_request_hook.patch` to Conpot
+  to pass real session/source/destination context into this hook.
 
 Default Conpot DataBus keys:
 

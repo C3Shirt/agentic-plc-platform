@@ -94,7 +94,6 @@ def main() -> int:
         context=ModbusHookContext(
             session_id="agentic-hook-smoke",
             source_ip="127.0.0.1",
-            actor_id="actor-local-smoke",
         ),
     )
     greenlet = gevent.spawn(server.start, "127.0.0.1", 0)
@@ -128,6 +127,11 @@ def main() -> int:
         print(f"deterministic input registers: {deterministic_inputs}")
         print(f"agentic decisions: {len(runtime.decisions)}")
         print(f"events: {len(store.list_events())}")
+        if store.list_events():
+            first_event = store.list_events()[0]
+            print(f"first event session: {first_event.session_id}")
+            print(f"first event source: {first_event.source_ip}:{first_event.source_port}")
+            print(f"first event actor: {first_event.actor_id}")
         print(f"last agent error: {hook.last_agent_error}")
         return 0
     finally:

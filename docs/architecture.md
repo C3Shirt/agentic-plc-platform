@@ -84,9 +84,12 @@ deception plans, generated Modbus TCP reply frames, and bounded world patches. I
 constructed with a `TankPumpWorld`, it applies accepted world patches and records
 the before/after snapshots in the decision object.
 
-The first Conpot integration point is `install_agentic_modbus_hook`, which
-wraps the decorated Conpot `ModbusServer.wrapped._databank` object rather than
-modifying upstream Conpot files.
+The first Conpot integration point is `install_agentic_modbus_hook`. With the
+local Conpot request-hook patch applied, it registers a hook through
+`ModbusServer.set_request_hook()` and receives real session/source/destination
+context from the connection handler. Without that Conpot patch, it can still
+fall back to wrapping the decorated `ModbusServer.wrapped._databank` object, but
+that fallback lacks true connection-level context.
 
 ### P5 - Evaluation
 

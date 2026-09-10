@@ -1,4 +1,5 @@
 import unittest
+from uuid import uuid4
 
 from agentic_plc.adapters import (
     AgenticModbusDatabank,
@@ -26,9 +27,23 @@ class FakeServer:
         self._databank = FakeDatabank()
 
 
+class FakeHookableServer(FakeServer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.request_hook = None
+
+    def set_request_hook(self, hook) -> None:
+        self.request_hook = hook
+
+
 class FakeDecoratedServer:
     def __init__(self) -> None:
         self.wrapped = FakeServer()
+
+
+class FakeDecoratedHookableServer:
+    def __init__(self) -> None:
+        self.wrapped = FakeHookableServer()
 
 
 class AgenticModbusDatabankTests(unittest.TestCase):
@@ -47,6 +62,7 @@ class AgenticModbusDatabankTests(unittest.TestCase):
         self.assertEqual(event.operation, "read_holding_registers")
         self.assertEqual(event.transaction_id, "17")
         self.assertEqual(event.unit_id, 1)
+        self.assertEqual(event.source_port, 50200)
         self.assertEqual(event.address, 0)
         self.assertEqual(event.count, 2)
 
@@ -103,6 +119,64 @@ class AgenticModbusDatabankTests(unittest.TestCase):
 
         self.assertIs(server.wrapped._databank, wrapped)
         self.assertFalse(hasattr(server, "_databank"))
+
+    def test_install_agentic_modbus_hook_uses_conpot_request_hook_when_available(
+        self,
+    ) -> None:
+        server = FakeDecoratedHookableServer()
+        event_log = InMemoryEventLog()
+        runtime = AgentRuntime(
+            world=TankPumpWorld(),
+            planner=RuleBasedDeceptionPlanner(),
+            event_store=event_log,
+        )
+
+        wrapped = install_agentic_modbus_hook(server, runtime)
+
+        self.assertIsNot(server.wrapped._databank, wrapped)
+        self.assertIsNotNone(server.wrapped.request_hook)
+        response, logdata = server.wrapped.request_hook(
+            query=None,
+            request=read_holding_register_request(transaction_id=17, unit_id=1),
+            mode="tcp",
+            context={
+                "session_id": "real-conpot-session",
+                "source_ip": "192.0.2.55",
+                "source_port": 50123,
+                "destination_ip": "127.0.0.1",
+                "destination_port": 502,
+            },
+        )
+
+        self.assertEqual(response.hex(), "00110000000701030401f40078")
+        self.assertEqual(logdata["agentic_generated"], True)
+        self.assertEqual(event_log.list_events()[0].session_id, "real-conpot-session")
+        self.assertEqual(event_log.list_events()[0].source_ip, "192.0.2.55")
+        self.assertEqual(event_log.list_events()[0].source_port, 50123)
+
+    def test_request_hook_normalizes_uuid_session_id(self) -> None:
+        server = FakeDecoratedHookableServer()
+        event_log = InMemoryEventLog()
+        runtime = AgentRuntime(
+            world=TankPumpWorld(),
+            planner=RuleBasedDeceptionPlanner(),
+            event_store=event_log,
+        )
+        install_agentic_modbus_hook(server, runtime)
+        session_id = uuid4()
+
+        server.wrapped.request_hook(
+            query=None,
+            request=read_holding_register_request(transaction_id=17, unit_id=1),
+            mode="tcp",
+            context={
+                "session_id": session_id,
+                "source_ip": "192.0.2.55",
+                "source_port": 50123,
+            },
+        )
+
+        self.assertEqual(event_log.list_events()[0].session_id, str(session_id))
 
 
 def read_holding_register_request(transaction_id: int, unit_id: int) -> bytes:
