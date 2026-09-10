@@ -67,19 +67,20 @@ safety, robustness, and fine-grained failure modes, not only task success.
 
 ## Design position for this project
 
-The strongest research position is not "LLM generates Modbus responses." That
-is brittle, slow, hard to validate, and likely to hallucinate protocol or
-process behavior.
+The strongest research position is not "LLM writes arbitrary bytes directly to
+the socket." That is brittle, slow, hard to validate, and likely to hallucinate
+protocol or process behavior.
 
 The stronger position is:
 
 Agentic PLC Honeypot = deterministic cyber-physical world + real protocol data
-plane + cross-surface deception state + bounded asynchronous agent controller.
+plane + cross-surface deception state + validated agent-generated actions.
 
 In this design, Conpot handles the protocol surface, the world model enforces
 process invariants, SSH/HMI/Modbus share the same revisioned state, and the LLM
-agent only proposes typed deception plans that pass validation before they can
-affect exposed artifacts.
+agent only proposes typed `AgentProposal` envelopes. These envelopes may include
+deception plans, generated Modbus TCP response frames, and bounded world-state
+patches, but each path has a validator before it can affect the honeypot.
 
 This gives the project a clean distinction from prior work:
 
@@ -91,8 +92,9 @@ This gives the project a clean distinction from prior work:
   and a clearer agentic deception layer.
 - Compared with HoneyGPT/LLMHoney: not limited to shell output; the shell,
   Modbus, HMI, alarms, maintenance files, and plant behavior all agree.
-- Compared with LLMPot: LLMs are used for offline scenario assistance and
-  online bounded planning, not direct protocol emulation.
+- Compared with LLMPot: LLMs may generate protocol responses, but generated
+  frames are constrained by protocol parsers, request correlation, world-model
+  invariants, and deterministic fallback.
 
 ## Improvement roadmap
 
@@ -109,9 +111,10 @@ plant artifacts.
 
 P4 should implement a bounded agent controller. The agent should classify actor
 trajectory, select from approved fault scenarios, publish maintenance notes, and
-decide which existing artifacts to expose. It should not create arbitrary
-register values or protocol bytes. The current `DeceptionPlanValidator` is the
-right boundary to extend.
+decide which existing artifacts to expose. When it generates protocol bytes or
+world-model mutations, those outputs must pass `ProtocolReplyValidator` and
+`WorldPatchApplier`. The current `AgentProposal` envelope is the right boundary
+to extend.
 
 P5 should add scenario generation as an offline workflow. LLMs can draft
 register maps, plant narratives, HMI labels, historian snippets, maintenance
@@ -139,12 +142,54 @@ agentic cross-surface honeypot.
 - Safety: no direct LLM mutation, no outbound attack enablement, no real PLC or
   production-network connectivity.
 
+## 2026 refresh: how the literature changes the next implementation steps
+
+The recent LLM-honeypot literature points to a hybrid architecture rather than a
+pure LLM emulator. HoneyGPT and LLMHoney show the value of mixing deterministic
+fast paths with LLM-generated outputs for novel attacker actions. LLMPot shows
+that industrial-protocol and process emulation can be configured with LLM
+assistance, but the hard part is still validation and physical consistency. The
+2026 SoK argues that the field is moving toward autonomous, self-improving
+deception systems, while also emphasizing detection vectors and evaluation
+quality.
+
+The current implementation now matches that direction:
+
+- `AgenticModbusDatabank` wraps Conpot's response path and can replace a
+  deterministic response with a validated generated Modbus TCP frame.
+- `AgentRuntime` consumes normalized events and applies accepted `world_patch`
+  actions against the shared `TankPumpWorld`.
+- `ProtocolReplyValidator` and `WorldPatchApplier` keep generated outputs within
+  protocol and process boundaries.
+
+The agent literature adds four concrete design requirements for the next phase.
+
+1. Build a narrow agent-computer interface. SWE-agent's main lesson is that
+   interface design matters. Our agent should not receive raw internal objects;
+   it should receive tools such as `read_world_snapshot`, `build_modbus_reply`,
+   `propose_world_patch`, `select_lure_artifact`, and `record_actor_note`.
+2. Use executable, state-based evaluation. WebArena and OSWorld are useful
+   because success is checked against environment state, not only text
+   similarity. Our benchmark should define attacker objectives, run Modbus/SSH/HMI
+   sessions, then grade final world state, transcript consistency, and suspicion
+   signals.
+3. Add episodic memory with feedback. Reflexion suggests storing compact
+   reflections after each session. For honeypots, the reflection should be
+   structured: actor fingerprint, commands/protocol functions tried, likely goal,
+   generated-action failures, and which lure progressed the interaction.
+4. Add a scenario/skill library. Voyager's useful idea is not Minecraft itself;
+   it is the growing library of reusable skills. Here that maps to reusable
+   industrial scenarios: tank tuning, pump fault, historian mismatch,
+   maintenance window, firmware backup, ladder-logic upload, and alarm recovery.
+
 ## Immediate engineering tasks
 
-1. Add a durable event store and event replay CLI.
+1. Add an actor/session correlation module.
 2. Add an HTTP HMI backed by `TankPumpWorld`.
 3. Port the useful MANTIS SSH patterns into an ICS maintenance gateway.
-4. Add an actor/session correlation module.
-5. Add the first asynchronous agent controller with only validated plan actions.
+4. Add an agent tool interface instead of free-form planner prompts.
+5. Add a scenario/skill library and deterministic scenario compiler.
 6. Add a benchmark harness comparing stock Conpot, deterministic, and agentic
    modes.
+7. Add fingerprint-hardening checks for TTL, banners, timing distributions,
+   exception behavior, and cross-surface contradictions.
