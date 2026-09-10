@@ -1,0 +1,16 @@
+{
+  "archive": "Tennessee Eastman Challenge Archive",
+  "source_url": "https://depts.washington.edu/control/LARRY/TE/download.html",
+  "format_url": "https://depts.washington.edu/control/LARRY/TE/IDVs/format.txt",
+  "downloaded_files": [
+    "temexd_mod.zip",
+    "tecode.zip",
+    "tables.zip",
+    "IDVs/format.txt",
+    "IDVs/idv1.zip"
+  ],
+  "notes": [
+    "Downloaded archives are intentionally ignored by git.",
+    "The first honeypot scenario uses IDV1 as a trace replay backend for a reactor/separator PLC slice."
+  ]
+}

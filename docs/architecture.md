@@ -5,8 +5,10 @@
 1. **Conpot adapter** receives parsed Modbus/S7/SNMP/HTTP operations and emits an
    `ICSEvent`. Its default response path is deterministic; generated responses
    must pass protocol validation before an adapter sends them.
-2. **World model** owns the global PLC and physical-process state. All exposed
-   services read from the same revisioned snapshot.
+2. **World model / Process backend** owns the global PLC and physical-process
+   state. All exposed services read from the same revisioned snapshot.
+   Backend-specific physics are hidden behind the generic `ProcessBackend`
+   contract.
 3. **Policy engine** validates protocol writes, agent-proposed deception plans,
    generated protocol replies, and world patches.
 4. **Agent controller** classifies actor trajectories and proposes typed
@@ -20,8 +22,13 @@
 ## First scenario
 
 The first scenario models a small tank, inlet valve, outlet pump, level sensor,
-pressure sensor, setpoint, automatic/manual mode, and high-level alarm. The canonical
-PDU addresses are defined in `scenarios/tank_pump/scenario.json`.
+pressure sensor, setpoint, automatic/manual mode, and high-level alarm. The
+canonical PDU addresses are defined in `scenarios/tank_pump/scenario.json`.
+
+The second scenario uses the Tennessee Eastman Challenge Process as an external
+trace backend. It exposes only a reactor/separator PLC slice through
+`scenarios/tennessee_eastman/scenario.json`; TE-specific columns stay inside the
+process backend and scenario mapping.
 
 ## Delivery order
 
@@ -46,6 +53,11 @@ Conpot's Modbus mediator mutates DataBus block objects directly during writes.
 An optional `AgenticModbusDatabank` hook can wrap Conpot's initialized Modbus
 databank and replace a deterministic response with a validated generated Modbus
 TCP frame.
+
+Current status: a generic process-backend layer exists for future physical
+processes. `TraceProcessBackend` replays sampled traces and
+`TennesseeEastmanTraceBackend` adapts TE IDV `t/y/u/r.dat` files into canonical
+measurement, manipulated-variable, and setpoint variables.
 
 ### P2 - Unified telemetry
 

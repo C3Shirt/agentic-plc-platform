@@ -10,8 +10,10 @@ designed to sit beside, rather than inside, the two reference projects:
 ## Initial scope
 
 The first milestone is a tank-pump process shared by Modbus and an HTTP HMI.
-The deterministic path remains the fallback baseline. The agentic path can add
-LLM-generated protocol replies and bounded world-state mutations after validation.
+The second physical-process target is a Tennessee Eastman trace backend exposed
+as a reactor/separator PLC slice. The deterministic path remains the fallback
+baseline. The agentic path can add LLM-generated protocol replies and bounded
+world-state mutations after validation.
 
 ```text
 request -> protocol adapter -> normalized event -> policy -> world transition
@@ -54,6 +56,14 @@ deterministic response path.
   Conpot's deterministic response path.
   Apply `integrations/conpot/patches/conpot_modbus_request_hook.patch` to Conpot
   to pass real session/source/destination context into this hook.
+- `ProcessBackend` is the simulator-neutral backend contract for future physical
+  processes. `TraceProcessBackend` replays sampled plant traces, and
+  `TennesseeEastmanTraceBackend` adapts TE `t/y/u/r.dat` files without coupling
+  protocol adapters to TE-specific columns.
+- `ProcessRegisterMap` exposes any scenario-mapped backend as Modbus-style
+  register reads/writes.
+- `scenarios/tennessee_eastman/scenario.json` maps a bounded TE
+  reactor/separator control cell to Modbus-facing points.
 
 Default Conpot DataBus keys:
 
@@ -114,6 +124,14 @@ $env:PYTHONPATH = "src;..\conpot-main\conpot-main"
 python tools\smoke_cross_surface.py
 ```
 
+Download and smoke-test the Tennessee Eastman trace backend:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\download_tennessee_eastman.py --idv idv1
+python tools\smoke_te_backend.py
+```
+
 The agent smoke uses the no-LLM planner by default and writes sample events to
 `records/agent_smoke_events.jsonl`. It also demonstrates accepted world patches
 and a local generated Modbus TCP response candidate:
@@ -133,3 +151,4 @@ For one-off diagnostics, use `--model <name>` with either smoke script instead
 of editing `.env`.
 
 See `docs/architecture.md` for component boundaries and the implementation order.
+See `docs/process_backend_design.md` for the generic simulator-backend boundary.

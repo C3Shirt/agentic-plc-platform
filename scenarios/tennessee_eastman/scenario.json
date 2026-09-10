@@ -1,0 +1,207 @@
+{
+  "scenario_id": "tennessee_eastman_reactor_separator_cell",
+  "process_id": "tennessee_eastman_idv1",
+  "plc_area": "reactor_separator_control_cell",
+  "description": "A PLC-facing slice of the Tennessee Eastman process. The backend may replay a TE IDV trace, while protocol adapters expose only a bounded reactor/separator control cell.",
+  "backend": {
+    "type": "tennessee_eastman_trace",
+    "asset_root": "external/tennessee_eastman",
+    "idv": "idv1",
+    "loop": false
+  },
+  "points": [
+    {
+      "variable_id": "xmeas_07",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 0,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 1.0,
+      "tag": "R-101.PT-101.PV",
+      "description": "Reactor pressure, kPa"
+    },
+    {
+      "variable_id": "xmeas_08",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 1,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "R-101.LT-101.PV",
+      "description": "Reactor level, percent"
+    },
+    {
+      "variable_id": "xmeas_09",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 2,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "R-101.TT-101.PV",
+      "description": "Reactor temperature, C"
+    },
+    {
+      "variable_id": "xmeas_11",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 3,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "V-101.TT-201.PV",
+      "description": "Separator temperature, C"
+    },
+    {
+      "variable_id": "xmeas_12",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 4,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "V-101.LT-201.PV",
+      "description": "Separator level, percent"
+    },
+    {
+      "variable_id": "xmeas_13",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 5,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 1.0,
+      "tag": "V-101.PT-201.PV",
+      "description": "Separator pressure, kPa"
+    },
+    {
+      "variable_id": "xmeas_15",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 6,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "T-101.LT-301.PV",
+      "description": "Stripper level, percent"
+    },
+    {
+      "variable_id": "xmeas_18",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 7,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "T-101.TT-301.PV",
+      "description": "Stripper temperature, C"
+    },
+    {
+      "variable_id": "xmeas_43",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 8,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "P-AREA.FI-G.PV",
+      "description": "Production rate of G, kmol/h"
+    },
+    {
+      "variable_id": "xset_08",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 0,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 1.0,
+      "tag": "R-101.PIC-101.SP",
+      "description": "Reactor pressure setpoint, kPa"
+    },
+    {
+      "variable_id": "xset_09",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 1,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "R-101.LIC-101.SP",
+      "description": "Reactor level setpoint, percent"
+    },
+    {
+      "variable_id": "xset_10",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 2,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "V-101.LIC-201.SP",
+      "description": "Separator level setpoint, percent"
+    },
+    {
+      "variable_id": "xset_11",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 3,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "T-101.LIC-301.SP",
+      "description": "Stripper level setpoint, percent"
+    },
+    {
+      "variable_id": "xset_36",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 4,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "R-101.TIC-101.SP",
+      "description": "Reactor temperature setpoint, C"
+    },
+    {
+      "variable_id": "xmv_10",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 5,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "R-101.TCV-101.OUT",
+      "description": "Reactor coolant valve output, percent"
+    },
+    {
+      "variable_id": "xmv_11",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 6,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "V-101.TCV-201.OUT",
+      "description": "Condenser coolant valve output, percent"
+    },
+    {
+      "variable_id": "xmv_04",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 7,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "FEED.FCV-004.OUT",
+      "description": "A+C feed valve output, percent"
+    }
+  ],
+  "metadata": {
+    "source_url": "https://depts.washington.edu/control/LARRY/TE/download.html",
+    "format_url": "https://depts.washington.edu/control/LARRY/TE/IDVs/format.txt",
+    "disturbance": "IDV1: Step in A/C feed ratio in stream 4",
+    "genericity_note": "The PLC exposes this as a scenario slice; other physical processes can implement the same ProcessBackend contract and provide a different scenario mapping."
+  }
+}

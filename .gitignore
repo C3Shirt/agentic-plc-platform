@@ -10,3 +10,6 @@ build/
 .env
 records/
 tests/data/data_temp_fs/
+external/tennessee_eastman/*.zip
+external/tennessee_eastman/IDVs_*.txt
+external/tennessee_eastman/extracted/
