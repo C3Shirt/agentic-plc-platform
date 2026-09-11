@@ -1,4 +1,4 @@
-"""Narrow adapters for Conpot, SSH, HMI, and telemetry will live here."""
+"""Narrow adapters for Conpot, HMI, protocol services, and telemetry."""
 from agentic_plc.adapters.conpot_agentic_modbus import (
     AgenticModbusDatabank,
     ConpotDatabankLike,

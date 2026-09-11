@@ -34,7 +34,7 @@ class JsonlEventStoreTests(unittest.TestCase):
 
     def test_serialization_ignores_unknown_fields(self) -> None:
         event = ICSEvent(
-            protocol="ssh",
+            protocol="opcua",
             session_id="s1",
             source_ip="192.0.2.20",
             intent=Intent.AUTH_ATTEMPT,
@@ -46,7 +46,7 @@ class JsonlEventStoreTests(unittest.TestCase):
 
         loaded = event_from_dict(payload)
         self.assertEqual(loaded.intent, Intent.AUTH_ATTEMPT)
-        self.assertEqual(loaded.protocol, "ssh")
+        self.assertEqual(loaded.protocol, "opcua")
 
     def test_replay_summary_counts_sessions_and_intents(self) -> None:
         events = [
@@ -61,7 +61,7 @@ class JsonlEventStoreTests(unittest.TestCase):
                 world_revision=1,
             ),
             ICSEvent(
-                protocol="ssh",
+                protocol="s7",
                 session_id="s2",
                 source_ip="192.0.2.10",
                 actor_id="actor-1",
@@ -77,7 +77,7 @@ class JsonlEventStoreTests(unittest.TestCase):
         self.assertEqual(summary.total_events, 2)
         self.assertEqual(summary.sessions, 2)
         self.assertEqual(summary.actors, 1)
-        self.assertEqual(summary.protocols, {"modbus": 1, "ssh": 1})
+        self.assertEqual(summary.protocols, {"modbus": 1, "s7": 1})
         self.assertEqual(summary.latest_world_revision, 2)
 
 

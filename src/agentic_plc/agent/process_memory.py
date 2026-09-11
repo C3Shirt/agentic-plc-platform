@@ -137,7 +137,14 @@ def compact_event_for_memory(event: ICSEvent) -> dict[str, Any]:
     compact = {key: data[key] for key in keep if key in data and data[key] is not None}
     metadata = {
         key: event.metadata[key]
-        for key in ("function_code", "exception_code")
+        for key in (
+            "function_code",
+            "exception_code",
+            "interaction_phase",
+            "interaction_phase_reason",
+            "actor_protocol_event_count",
+            "actor_protocol_unique_touched_addresses",
+        )
         if key in event.metadata
     }
     if metadata:

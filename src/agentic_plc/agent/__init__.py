@@ -14,6 +14,16 @@ from agentic_plc.agent.planner import (
     RuleBasedDeceptionPlanner,
     proposal_from_payload,
 )
+from agentic_plc.agent.protocol_interaction import (
+    ActorProtocolState,
+    InteractionPhase,
+    ProtocolAddressRange,
+    ProtocolIntentTracker,
+)
+from agentic_plc.agent.response_policy import (
+    ProcessAwareResponsePolicy,
+    ProtocolStrategyPlanner,
+)
 from agentic_plc.agent.runtime import AgentRuntime, AgentRuntimeConfig
 from agentic_plc.contracts.actions import (
     AgentProposal,
@@ -28,17 +38,23 @@ __all__ = [
     "AgentProposal",
     "AgentRuntime",
     "AgentRuntimeConfig",
+    "ActorProtocolState",
     "CompressedProcessContext",
     "CompressedProcessPoint",
     "ContextBudget",
     "DeceptionPlanner",
     "ExposedProcessPoint",
+    "InteractionPhase",
     "LLMConfig",
     "OpenAICompatiblePlanner",
     "PlannerResponseError",
     "ProtocolReply",
     "PhysicalProcessContext",
+    "ProcessAwareResponsePolicy",
     "ProcessContextCompressor",
+    "ProtocolAddressRange",
+    "ProtocolIntentTracker",
+    "ProtocolStrategyPlanner",
     "RejectedPlan",
     "RuleBasedDeceptionPlanner",
     "WorldPatch",

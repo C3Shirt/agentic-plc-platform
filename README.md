@@ -5,7 +5,8 @@ designed to sit beside, rather than inside, the two reference projects:
 
 - `../conpot-main/conpot-main`: ICS protocol data plane.
 - `../MANTIS_Terminal_Simulation-main/MANTIS_Terminal_Simulation-main`: reference
-  implementation for stateful SSH interaction.
+  for stateful, LLM-assisted multi-turn interaction design ideas. This project
+  does not add an SSH honeypot surface.
 
 ## Initial scope
 
@@ -47,6 +48,12 @@ deterministic response path.
   rule planner or an OpenAI-compatible planner loaded from `.env`. When supplied
   with `PhysicalProcessContext`, the same generic agent sees the active process
   backend, current snapshot, exposed PLC points, and writable process variables.
+- `ProtocolIntentTracker` keeps per-actor, per-protocol interaction state over
+  normalized protocol events. This ports the stateful multi-turn design idea
+  from MANTIS into ICS protocol traffic without adding an SSH service.
+- `ProcessAwareResponsePolicy` wraps a base planner with protocol-phase-aware
+  deception plans for address probing, register mapping, write attempts, and
+  write-effect verification.
 - `AgentProposal` supports three validated outputs:
   - `deception_plan`: adjust lures, maintenance notes, and exposed artifacts.
   - `protocol_reply`: generated Modbus TCP response bytes in hex.
@@ -148,6 +155,7 @@ python tools\download_tennessee_eastman.py --idv idv1
 python tools\smoke_te_backend.py
 python tools\smoke_process_aware_agent.py
 python tools\smoke_context_compressor.py
+python tools\smoke_protocol_interaction.py
 ```
 
 The agent smoke uses the no-LLM planner by default and writes sample events to

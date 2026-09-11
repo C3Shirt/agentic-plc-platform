@@ -17,7 +17,7 @@ class ActorCorrelationTests(unittest.TestCase):
         )
         second = correlator.actor_id_for(
             SessionContext(
-                protocol="ssh",
+                protocol="opcua",
                 session_id="s2",
                 source_ip="192.0.2.10",
                 source_port=50101,

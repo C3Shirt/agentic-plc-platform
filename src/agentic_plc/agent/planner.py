@@ -306,7 +306,23 @@ class OpenAICompatiblePlanner:
             "result",
             "world_revision",
         }
-        return {key: data[key] for key in keep if key in data}
+        compact = {key: data[key] for key in keep if key in data}
+        metadata = {
+            key: event.metadata[key]
+            for key in (
+                "function_code",
+                "exception_code",
+                "interaction_phase",
+                "interaction_phase_reason",
+                "actor_protocol_event_count",
+                "actor_protocol_unique_touched_addresses",
+                "actor_protocol_last_write_range",
+            )
+            if key in event.metadata
+        }
+        if metadata:
+            compact["metadata"] = metadata
+        return compact
 
 
 def completion_url(base_url: str) -> str:

@@ -16,8 +16,8 @@ ProtocolAdapter -> ScenarioMapping -> ProcessBackend -> PhysicalProcessContext -
 - `ProcessRegisterMap` turns a scenario-mapped backend into Modbus-style
   register reads/writes. It is generic and should work for TE, water-treatment,
   power-grid, or building-automation backends if they expose the same contract.
-- `ProtocolAdapter` remains protocol-specific. Modbus, HTTP HMI, SSH
-  maintenance, S7, OPC UA, or DNP3 should all read/write through mappings rather
+- `ProtocolAdapter` remains protocol-specific. Modbus, HTTP HMI, S7, OPC UA,
+  DNP3, BACnet, or EtherNet/IP should all read/write through mappings rather
   than through simulator-specific column numbers.
 - `AgentRuntime` can observe protocol events and propose generated replies or
   world patches. The backend remains the state authority after validation.

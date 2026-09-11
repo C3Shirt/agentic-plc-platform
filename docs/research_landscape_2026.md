@@ -77,10 +77,11 @@ Agentic PLC Honeypot = deterministic cyber-physical world + real protocol data
 plane + cross-surface deception state + validated agent-generated actions.
 
 In this design, Conpot handles the protocol surface, the world model enforces
-process invariants, SSH/HMI/Modbus share the same revisioned state, and the LLM
-agent only proposes typed `AgentProposal` envelopes. These envelopes may include
-deception plans, generated Modbus TCP response frames, and bounded world-state
-patches, but each path has a validator before it can affect the honeypot.
+process invariants, Modbus/HMI/future ICS protocol adapters share the same
+revisioned state, and the LLM agent only proposes typed `AgentProposal`
+envelopes. These envelopes may include deception plans, generated Modbus TCP
+response frames, and bounded world-state patches, but each path has a validator
+before it can affect the honeypot.
 
 This gives the project a clean distinction from prior work:
 
@@ -90,8 +91,9 @@ This gives the project a clean distinction from prior work:
   the idea of PLC profiles and uploaded logic capture.
 - Compared with HoneyICS/ICSLure: less hardware realism, but easier deployment
   and a clearer agentic deception layer.
-- Compared with HoneyGPT/LLMHoney: not limited to shell output; the shell,
-  Modbus, HMI, alarms, maintenance files, and plant behavior all agree.
+- Compared with HoneyGPT/LLMHoney: not limited to shell output; industrial
+  protocol replies, HMI views, alarms, maintenance-style artifacts, and plant
+  behavior all agree.
 - Compared with LLMPot: LLMs may generate protocol responses, but generated
   frames are constrained by protocol parsers, request correlation, world-model
   invariants, and deterministic fallback.
@@ -103,11 +105,12 @@ SQLite event store, per-connection session IDs, actor correlation, normalized
 read/write/invalid-address events, and replay tests. The agent should consume
 this event stream, not protocol internals.
 
-P3 should add cross-surface consistency. Build an HTTP HMI and SSH maintenance
-gateway that expose the same world revision as Modbus. The SSH side can borrow
-MANTIS-style command classification, deterministic handlers, and session
-memory, but command output must come from the shared ICS world and curated
-plant artifacts.
+P3 should add cross-surface consistency across protocol-facing services. Build
+an HTTP HMI and future ICS protocol adapters that expose the same world revision
+as Modbus. The MANTIS idea to preserve is stateful multi-turn interaction:
+classification, deterministic fast paths, and actor/session memory should be
+implemented over normalized ICS protocol events and curated plant artifacts,
+not through an SSH service.
 
 P4 should implement a bounded agent controller. The agent should classify actor
 trajectory, select from approved fault scenarios, publish maintenance notes, and
@@ -131,7 +134,8 @@ agentic cross-surface honeypot.
 
 - Protocol validity: legal responses, exception codes, malformed input handling.
 - Process validity: no impossible plant states; alarms and interlocks obey rules.
-- Cross-surface consistency: Modbus, HTTP, and SSH show the same world revision.
+- Cross-surface consistency: Modbus, HTTP, and future ICS protocol adapters show
+  the same world revision.
 - Interaction depth: command count, session duration, state-changing actions.
 - Deception quality: human or model-assisted suspicion score and contradiction
   count.
@@ -170,9 +174,9 @@ The agent literature adds four concrete design requirements for the next phase.
    `propose_world_patch`, `select_lure_artifact`, and `record_actor_note`.
 2. Use executable, state-based evaluation. WebArena and OSWorld are useful
    because success is checked against environment state, not only text
-   similarity. Our benchmark should define attacker objectives, run Modbus/SSH/HMI
-   sessions, then grade final world state, transcript consistency, and suspicion
-   signals.
+   similarity. Our benchmark should define attacker objectives, run Modbus/HMI
+   and future ICS protocol sessions, then grade final world state, transcript
+   consistency, and suspicion signals.
 3. Add episodic memory with feedback. Reflexion suggests storing compact
    reflections after each session. For honeypots, the reflection should be
    structured: actor fingerprint, commands/protocol functions tried, likely goal,
@@ -186,7 +190,8 @@ The agent literature adds four concrete design requirements for the next phase.
 
 1. Add an actor/session correlation module.
 2. Add an HTTP HMI backed by `TankPumpWorld`.
-3. Port the useful MANTIS SSH patterns into an ICS maintenance gateway.
+3. Port the useful MANTIS stateful-interaction patterns into the protocol
+   interaction layer.
 4. Add an agent tool interface instead of free-form planner prompts.
 5. Add a scenario/skill library and deterministic scenario compiler.
 6. Add a benchmark harness comparing stock Conpot, deterministic, and agentic

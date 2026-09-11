@@ -77,7 +77,9 @@ The output has five sections:
   validation depends on the full allowed path set.
 - `actor_memory`: deterministic episodic memory for the current actor/source,
   including intent counts, recently touched PLC points, and the last exact
-  protocol events.
+  protocol events. When `ProtocolIntentTracker` has enriched runtime events,
+  this section also carries interaction-phase fields such as register mapping,
+  write attempt, or write-effect verification.
 
 ## Ranking policy
 

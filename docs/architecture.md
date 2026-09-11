@@ -15,10 +15,30 @@
    typed `AgentProposal` envelopes from normalized events plus the active
    physical-process context. A failed or missing agent falls back to
    deterministic protocol behavior.
-5. **SSH maintenance gateway** has per-session shell state but reads the same global
-   plant state as Conpot.
+5. **Protocol interaction state** keeps per-actor, per-protocol multi-turn state
+   such as address probing, register mapping, write attempts, and write-effect
+   verification. This borrows the stateful interaction idea from MANTIS without
+   adding an SSH service.
 6. **Telemetry** stores immutable events with connection, actor, protocol, address,
    previous value, new value, result, and world revision.
+
+## Protocol interaction state
+
+The runtime keeps actor/session dynamics separate from plant state. The
+`ProtocolIntentTracker` observes normalized `ICSEvent` records and enriches each
+stored event with an `interaction_phase`, such as:
+
+- `process_monitoring`
+- `register_mapping`
+- `address_probing`
+- `write_attempt`
+- `effect_verification`
+
+This is the MANTIS-inspired part of the design: the agent reasons over a
+multi-turn interaction trajectory. The implementation remains protocol-facing
+and does not add an SSH service. A `ProcessAwareResponsePolicy` can wrap any
+base planner and add bounded deception plans while protocol replies and world
+patches still pass through their validators.
 
 ## First scenario
 
@@ -37,7 +57,8 @@ process backend and scenario mapping.
 
 - Run the original Conpot Modbus and HTTP services.
 - Save protocol captures and expected responses.
-- Record the MANTIS SSH session/event behavior that is worth preserving.
+- Record the MANTIS stateful-interaction behavior that is worth preserving at
+  the design level, not its SSH-specific surface.
 
 ### P1 - Deterministic PLC world
 
@@ -78,10 +99,11 @@ added at the protocol adapter layer.
 ### P3 - Cross-surface consistency
 
 - Add the HTTP HMI.
-- Add an SSH maintenance gateway using deterministic commands first.
-- Align asset identity, timestamps, alarms, project files, and register values.
+- Align asset identity, timestamps, alarms, historian-like values, and register
+  values across protocol-facing surfaces.
 
-Gate: Modbus, HTTP, and SSH expose the same world revision.
+Gate: Modbus, HTTP, and future ICS protocol adapters expose the same world
+revision.
 
 Current status: a minimal HTTP HMI exists and is backed by the same
 `TankPumpWorld` as the Conpot Modbus template. The cross-surface smoke writes a
@@ -117,6 +139,11 @@ local Conpot request-hook patch applied, it registers a hook through
 context from the connection handler. Without that Conpot patch, it can still
 fall back to wrapping the decorated `ModbusServer.wrapped._databank` object, but
 that fallback lacks true connection-level context.
+
+Current status: `ProtocolIntentTracker` now enriches runtime events with
+protocol interaction phases, and `ProcessAwareResponsePolicy` can add bounded
+deception plans for address probing, register mapping, write attempts, and
+write-effect verification without changing the deterministic protocol fallback.
 
 ### P5 - Evaluation
 
