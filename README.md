@@ -185,6 +185,23 @@ python tools\generate_consistency_benchmark.py
 python tools\generate_consistency_benchmark.py --output records\consistency_benchmark.json
 ```
 
+Import CIC Modbus 2023 or tshark-exported Modbus CSV rows into the same
+benchmark schema:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\import_cic_modbus_benchmark.py --print-tshark sample.pcap records\cic_modbus_packets.csv
+python tools\import_cic_modbus_benchmark.py `
+  --packets records\cic_modbus_packets.csv `
+  --attack-log records\cic_modbus_attack_log.csv `
+  --run `
+  --output records\cic_modbus_benchmark.json
+```
+
+This importer is protocol-focused. It preserves CIC attack labels and checks
+Modbus state-machine consistency, but it does not infer physical-process truth
+from CIC traffic unless a separate process/register mapping is supplied later.
+
 The agent smoke uses the no-LLM planner by default and writes sample events to
 `records/agent_smoke_events.jsonl`. It also demonstrates accepted world patches
 and a local generated Modbus TCP response candidate:

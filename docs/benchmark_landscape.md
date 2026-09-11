@@ -17,7 +17,8 @@ industrial-protocol state-machine consistency
 There are strong adjacent resources, but they mostly evaluate IDS/anomaly
 detection, honeypot camouflage, or non-ICS LLM honeypots. Therefore the project
 now includes a local synthetic benchmark generator as the first reproducible
-baseline. Public datasets can later be adapted into the same benchmark format.
+baseline, plus a CIC Modbus/tshark CSV importer for adapting public Modbus
+traffic into the same format without adding a heavy PCAP parsing dependency.
 
 ## Adjacent public resources
 
@@ -83,10 +84,49 @@ public dataset trace/pcap
 
 Useful next extensions:
 
-1. Import CIC Modbus 2023 PCAP/log samples into `BenchmarkCase` objects.
+1. Use `tools/import_cic_modbus_benchmark.py` to convert CIC Modbus 2023
+   packet CSV and attack logs into `BenchmarkCase` objects.
 2. Map TE/SWaT/HAI process traces into `PhysicalProcessContext` and define
    cross-variable physical invariants.
 3. Add S7/ISO-on-TCP or IEC-104 cases once those protocol profiles are
    implemented.
 4. Add attacker-agent-driven evaluation inspired by Honeyval, but with ICS
    protocol goals instead of HTTP exploit goals.
+
+## CIC Modbus CSV import path
+
+The CIC Modbus 2023 data is useful because it contains Modbus PCAPs and attack
+logs, but the PCAP files can be large and the project should not depend on one
+packet parser. The implemented importer therefore accepts a normalized CSV,
+typically exported from tshark:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\import_cic_modbus_benchmark.py --print-tshark sample.pcap records\cic_modbus_packets.csv
+```
+
+The generated command exports fields such as transaction id, unit id, function
+code, address, count/value fields, IP/port context, and raw TCP payload. The
+actual import then preserves CIC attack-log labels when available:
+
+```powershell
+python tools\import_cic_modbus_benchmark.py `
+  --packets records\cic_modbus_packets.csv `
+  --attack-log records\cic_modbus_attack_log.csv `
+  --run `
+  --output records\cic_modbus_benchmark.json
+```
+
+What this gives us now:
+
+- real public Modbus traffic converted into `BenchmarkCase` / `BenchmarkStep`;
+- protocol-FSM expectations for allowed, anomalous, and denied transitions;
+- attack labels stored in `ICSEvent.metadata` for later per-attack analysis;
+- a reproducible JSON artifact that can be replayed by our benchmark runner.
+
+What it intentionally does not claim:
+
+- no physical-process ground truth is inferred from CIC Modbus packets alone;
+- no LLM-generated response quality score is assigned without a mapped process
+  backend and expected read/write effects;
+- no raw PCAP parsing dependency is required inside the platform.
