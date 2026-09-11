@@ -19,6 +19,7 @@ from agentic_plc.contracts.actions import (
 from agentic_plc.contracts.events import DeceptionPlan, ICSEvent, Intent
 from agentic_plc.protocols.modbus import (
     ModbusFrameError,
+    build_modbus_tcp_exception_response,
     build_modbus_tcp_read_bits_response,
     build_modbus_tcp_read_registers_response,
     build_modbus_tcp_response_from_request,
@@ -378,12 +379,14 @@ class OpenAICompatiblePlanner:
             "JSON object with keys deception_plan, protocol_reply, world_patch. "
             "Use null for unused keys. Base protocol replies on the current "
             "snapshot and exposed PLC points. For Modbus read_process events, "
-            "protocol_reply must use protocol=modbus_tcp and include payload_hex, "
-            "reason, transaction_id, unit_id. World patches may only use path "
-            "values from allowed_world_patch_paths. For a successful Modbus "
-            "write acknowledgement, include a world_patch that decodes the "
-            "requested register value into the exact mapped process variable "
-            "engineering value. Do not invent unmapped PLC addresses. Payload: "
+            "protocol_reply must use protocol=modbus_tcp and include reason, "
+            "transaction_id, unit_id, and either payload_hex or structured "
+            "fields such as function_code, values, address, count, or "
+            "exception_code. World patches may only use path values from "
+            "allowed_world_patch_paths. For a successful Modbus write "
+            "acknowledgement, include a world_patch that decodes the requested "
+            "register value into the exact mapped process variable engineering "
+            "value. Do not invent unmapped PLC addresses. Payload: "
             + json.dumps(
                 {
                     "allowed_world_patch_paths": writable_paths,
@@ -515,13 +518,13 @@ def _parse_deception_plan(payload: dict[str, object]) -> DeceptionPlan | None:
 
 
 def _parse_protocol_reply(payload: dict[str, object]) -> ProtocolReply | None:
-    payload_hex = payload.get("payload_hex")
-    if payload_hex in {None, "", "none"}:
+    payload_hex = _protocol_payload_hex(payload)
+    if payload_hex is None:
         return None
     return ProtocolReply(
         protocol=str(payload.get("protocol", "modbus_tcp")),
-        payload_hex=str(payload_hex),
-        reason=str(payload["reason"]),
+        payload_hex=payload_hex,
+        reason=str(payload.get("reason", "generated protocol response")),
         transaction_id=(
             None
             if payload.get("transaction_id") is None
@@ -530,6 +533,109 @@ def _parse_protocol_reply(payload: dict[str, object]) -> ProtocolReply | None:
         unit_id=None if payload.get("unit_id") is None else int(payload["unit_id"]),
         metadata=dict(payload.get("metadata", {})),
     )
+
+
+def _protocol_payload_hex(payload: dict[str, object]) -> str | None:
+    payload_hex = payload.get("payload_hex")
+    if payload_hex not in {None, "", "none"}:
+        return str(payload_hex)
+
+    protocol = str(payload.get("protocol", "modbus_tcp")).lower()
+    if protocol not in {"modbus", "modbus_tcp"}:
+        return None
+    has_structured_fields = any(
+        key in payload
+        for key in (
+            "function_code",
+            "values",
+            "value",
+            "address",
+            "count",
+            "exception_code",
+            "request_hex",
+        )
+    )
+    if not has_structured_fields:
+        return None
+    try:
+        return _structured_modbus_payload_hex(payload)
+    except (KeyError, TypeError, ValueError, ModbusFrameError) as exc:
+        raise PlannerResponseError(
+            f"structured protocol_reply is invalid: {exc}"
+        ) from exc
+
+
+def _structured_modbus_payload_hex(payload: dict[str, object]) -> str:
+    exception_code = payload.get("exception_code")
+    request_hex = payload.get("request_hex")
+    if isinstance(request_hex, str) and request_hex.strip():
+        values = _payload_values(payload, required=False)
+        return build_modbus_tcp_response_from_request(
+            request_hex,
+            values=values,
+            exception_code=None if exception_code is None else int(exception_code),
+        )
+
+    function_code = int(payload["function_code"])
+    transaction_id = int(str(payload["transaction_id"]), 0)
+    unit_id = int(payload.get("unit_id", 1))
+    if exception_code is not None:
+        return build_modbus_tcp_exception_response(
+            transaction_id=transaction_id,
+            unit_id=unit_id,
+            function_code=function_code,
+            exception_code=int(exception_code),
+        )
+    if function_code in {1, 2}:
+        return build_modbus_tcp_read_bits_response(
+            transaction_id=transaction_id,
+            unit_id=unit_id,
+            function_code=function_code,
+            values=_payload_values(payload),
+        )
+    if function_code in {3, 4}:
+        return build_modbus_tcp_read_registers_response(
+            transaction_id=transaction_id,
+            unit_id=unit_id,
+            function_code=function_code,
+            values=[int(value) for value in _payload_values(payload)],
+        )
+    if function_code in {5, 6}:
+        values = _payload_values(payload, required=False)
+        value = payload.get("value") if not values else values[0]
+        if value is None:
+            raise PlannerResponseError("single-write reply requires value")
+        return build_modbus_tcp_write_single_response(
+            transaction_id=transaction_id,
+            unit_id=unit_id,
+            function_code=function_code,
+            address=int(payload["address"]),
+            value=value,
+        )
+    if function_code in {15, 16}:
+        return build_modbus_tcp_write_multiple_response(
+            transaction_id=transaction_id,
+            unit_id=unit_id,
+            function_code=function_code,
+            address=int(payload["address"]),
+            count=int(payload["count"]),
+        )
+    raise PlannerResponseError(f"unsupported Modbus function: {function_code}")
+
+
+def _payload_values(
+    payload: dict[str, object],
+    *,
+    required: bool = True,
+) -> list[object]:
+    values = payload.get("values")
+    if values is None:
+        if required:
+            raise PlannerResponseError("protocol_reply requires values")
+        return []
+    if not isinstance(values, (list, tuple)):
+        raise PlannerResponseError("protocol_reply values must be a list")
+    return list(values)
 
 
 def _parse_world_patch(payload: dict[str, object]) -> WorldPatch | None:

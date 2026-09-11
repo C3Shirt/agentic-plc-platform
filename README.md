@@ -62,6 +62,9 @@ deterministic response path.
 - `AgentProposal` supports three validated outputs:
   - `deception_plan`: adjust lures, maintenance notes, and exposed artifacts.
   - `protocol_reply`: generated Modbus TCP response bytes in hex.
+    LLM planners may also provide structured fields such as function code,
+    values, address, count, or exception code; the platform converts those into
+    `payload_hex` before validation.
   - `world_patch`: bounded mutations to tank level, pressure, mode, alarms, and
     actuator state.
 - `install_agentic_modbus_hook` can wrap an initialized Conpot `ModbusServer`

@@ -15,6 +15,7 @@ from agentic_plc.contracts.events import DeceptionPlan, ICSEvent, Intent
 from agentic_plc.protocols.modbus import (
     build_modbus_tcp_read_registers_response,
     build_modbus_tcp_write_single_response,
+    parse_modbus_tcp_frame,
 )
 from agentic_plc.world import TankPumpWorld
 
@@ -192,6 +193,26 @@ class AgentControllerTests(unittest.TestCase):
         self.assertIsNotNone(proposal.deception_plan)
         self.assertIsNotNone(proposal.protocol_reply)
         self.assertIsNotNone(proposal.world_patch)
+
+    def test_parses_structured_protocol_reply_into_modbus_payload(self) -> None:
+        proposal = proposal_from_payload(
+            {
+                "protocol_reply": {
+                    "protocol": "modbus_tcp",
+                    "transaction_id": "17",
+                    "unit_id": 1,
+                    "function_code": 3,
+                    "values": [500, 120],
+                    "reason": "structured generated read response",
+                }
+            }
+        )
+
+        assert proposal is not None
+        assert proposal.protocol_reply is not None
+        frame = parse_modbus_tcp_frame(proposal.protocol_reply.payload_hex)
+        self.assertEqual(frame.function_code, 3)
+        self.assertEqual(frame.data, bytes.fromhex("0401f40078"))
 
     def _event(self, intent: Intent, requested_value: int | None = None) -> ICSEvent:
         return ICSEvent(

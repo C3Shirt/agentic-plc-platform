@@ -150,6 +150,9 @@ responses, read-register responses, single-write echoes, multiple-write echoes,
 and exception responses. `ProtocolReplyValidator` checks that generated response
 frames match the latest request's transaction id, unit id, function code, read
 byte count, and write echo fields before an adapter can send them.
+LLM planners may return either exact `payload_hex` or structured Modbus reply
+fields; structured replies are converted to bytes before the same validator is
+applied.
 
 Current status: protocol writes against a scenario-mapped physical process can
 now be translated into a process-variable `world_patch` before a generated
