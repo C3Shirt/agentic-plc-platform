@@ -38,6 +38,8 @@ class LLMConfig:
     model: str
     timeout_seconds: float = 15.0
     max_tokens: int = 300
+    context_max_points: int = 12
+    context_max_events: int = 5
 
     @property
     def is_configured(self) -> bool:
@@ -54,6 +56,8 @@ class LLMConfig:
 
         timeout = merged.get("LLM_TIMEOUT_SECONDS", "15")
         max_tokens = merged.get("LLM_MAX_TOKENS", "300")
+        context_max_points = merged.get("LLM_CONTEXT_MAX_POINTS", "12")
+        context_max_events = merged.get("LLM_CONTEXT_MAX_EVENTS", "5")
         return cls(
             base_url=first_present(
                 merged,
@@ -76,6 +80,8 @@ class LLMConfig:
             or "gpt-4o-mini",
             timeout_seconds=float(timeout),
             max_tokens=int(max_tokens),
+            context_max_points=int(context_max_points),
+            context_max_events=int(context_max_events),
         )
 
 

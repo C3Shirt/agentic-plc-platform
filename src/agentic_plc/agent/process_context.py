@@ -16,6 +16,8 @@ class ExposedProcessPoint:
     name: str
     value: float
     unit: str | None = None
+    minimum: float | None = None
+    maximum: float | None = None
     protocol: str | None = None
     table: str | None = None
     address: int | None = None
@@ -32,6 +34,8 @@ class ExposedProcessPoint:
             "name": self.name,
             "value": self.value,
             "unit": self.unit,
+            "minimum": self.minimum,
+            "maximum": self.maximum,
             "protocol": self.protocol,
             "table": self.table,
             "address": self.address,
@@ -79,6 +83,8 @@ class PhysicalProcessContext:
                     name=variable.name,
                     value=snapshot.read(variable_id),
                     unit=variable.unit,
+                    minimum=variable.minimum,
+                    maximum=variable.maximum,
                     writable=variable.writable,
                     metadata=variable.metadata,
                 )
@@ -95,6 +101,8 @@ class PhysicalProcessContext:
                     name=variable.name,
                     value=snapshot.read(mapping.variable_id),
                     unit=variable.unit,
+                    minimum=variable.minimum,
+                    maximum=variable.maximum,
                     protocol=mapping.protocol,
                     table=mapping.table,
                     address=mapping.address,

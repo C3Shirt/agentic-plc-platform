@@ -66,6 +66,10 @@ deterministic response path.
   register reads/writes.
 - `scenarios/tennessee_eastman/scenario.json` maps a bounded TE
   reactor/separator control cell to Modbus-facing points.
+- `ProcessContextCompressor` applies Process-Aware Context Compression (PACC)
+  before LLM calls. It keeps protocol-critical fields exact, ranks exposed
+  process points by request relevance and actor interest, and leaves
+  deterministic fallback plus proposal validators unchanged.
 
 Default Conpot DataBus keys:
 
@@ -143,6 +147,7 @@ $env:PYTHONPATH = "src"
 python tools\download_tennessee_eastman.py --idv idv1
 python tools\smoke_te_backend.py
 python tools\smoke_process_aware_agent.py
+python tools\smoke_context_compressor.py
 ```
 
 The agent smoke uses the no-LLM planner by default and writes sample events to
@@ -165,3 +170,4 @@ of editing `.env`.
 
 See `docs/architecture.md` for component boundaries and the implementation order.
 See `docs/process_backend_design.md` for the generic simulator-backend boundary.
+See `docs/process_context_compression.md` for the paper-backed PACC design.

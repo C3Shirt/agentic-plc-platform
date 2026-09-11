@@ -8,6 +8,7 @@ import urllib.request
 from typing import Protocol
 
 from agentic_plc.agent.config import LLMConfig
+from agentic_plc.agent.context_compressor import ContextBudget, ProcessContextCompressor
 from agentic_plc.agent.process_context import PhysicalProcessContext
 from agentic_plc.contracts.actions import (
     AgentProposal,
@@ -167,6 +168,12 @@ class OpenAICompatiblePlanner:
         if not config.is_configured:
             raise ValueError("LLM planner requires base_url and api_key")
         self._config = config
+        self._context_compressor = ProcessContextCompressor(
+            ContextBudget(
+                max_points=config.context_max_points,
+                max_events=config.context_max_events,
+            )
+        )
 
     def propose(
         self,
@@ -246,7 +253,11 @@ class OpenAICompatiblePlanner:
         context: PhysicalProcessContext | None = None,
     ) -> str:
         compact_events = [self._compact_event(event) for event in events[-8:]]
-        context_payload = context.to_prompt_dict() if context else None
+        context_payload = (
+            self._context_compressor.compress(context, events).to_prompt_dict()
+            if context
+            else None
+        )
         writable_paths = (
             context.writable_variable_ids()
             if context

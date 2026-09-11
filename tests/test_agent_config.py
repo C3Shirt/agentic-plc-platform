@@ -18,7 +18,9 @@ class AgentConfigTests(unittest.TestCase):
                 "OpenAIBaseURL=\"https://example.test/v1\"\n"
                 "APIKey='dummy-key'\n"
                 "OpenAIModel=test-model\n"
-                "LLM_MAX_TOKENS=123\n",
+                "LLM_MAX_TOKENS=123\n"
+                "LLM_CONTEXT_MAX_POINTS=7\n"
+                "LLM_CONTEXT_MAX_EVENTS=4\n",
                 encoding="utf-8",
             )
 
@@ -29,6 +31,8 @@ class AgentConfigTests(unittest.TestCase):
             self.assertEqual(config.api_key, "dummy-key")
             self.assertEqual(config.model, "test-model")
             self.assertEqual(config.max_tokens, 123)
+            self.assertEqual(config.context_max_points, 7)
+            self.assertEqual(config.context_max_events, 4)
 
     def test_load_dotenv_values_ignores_comments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
