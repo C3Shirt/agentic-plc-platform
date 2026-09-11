@@ -19,7 +19,11 @@
    such as address probing, register mapping, write attempts, and write-effect
    verification. This borrows the stateful interaction idea from MANTIS without
    adding an SSH service.
-6. **Telemetry** stores immutable events with connection, actor, protocol, address,
+6. **Protocol state machines** keep per-session protocol legality separate from
+   attacker intent and plant state. They answer whether the next protocol
+   transition is allowed, anomalous-but-servable, or denied before generated
+   protocol bytes can be sent.
+7. **Telemetry** stores immutable events with connection, actor, protocol, address,
    previous value, new value, result, and world revision.
 
 ## Protocol interaction state
@@ -39,6 +43,14 @@ multi-turn interaction trajectory. The implementation remains protocol-facing
 and does not add an SSH service. A `ProcessAwareResponsePolicy` can wrap any
 base planner and add bounded deception plans while protocol replies and world
 patches still pass through their validators.
+
+The `ProtocolStateMachineRegistry` is a separate layer. It enriches each event
+with `protocol_fsm_allowed`, `protocol_fsm_status`, and a reason code before the
+intent tracker runs. This distinction matters because a protocol transition can
+be illegal even when the attacker's long-term intent is clear. For example,
+future OPC UA, S7, DNP3, or IEC-104 profiles may require a handshake, activated
+session, sequence number, or select-before-operate transition before reads,
+writes, or commands are servable.
 
 ## First scenario
 
@@ -159,6 +171,13 @@ now be translated into a process-variable `world_patch` before a generated
 Modbus write acknowledgement is released. A successful write ACK is withheld
 unless the paired world patch is accepted, preserving read-back consistency and
 keeping deterministic Conpot fallback available for unmapped or rejected writes.
+
+Current status: a generic `ProtocolStateMachine` interface and registry now run
+inside `AgentRuntime.observe()`. The first concrete profile is Modbus TCP, which
+models Modbus as a session-light protocol while checking transaction id, unit
+id, function-code/operation consistency, request shape, and suspicious
+transaction-id reuse. `ProtocolReplyValidator` rejects generated replies for
+events whose protocol transition was denied by the state machine.
 
 ### P5 - Evaluation
 

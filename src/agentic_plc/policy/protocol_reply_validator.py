@@ -39,6 +39,14 @@ class ProtocolReplyValidator:
         context = _latest_event_with_protocol(events or [], {"modbus", "modbus_tcp"})
         if context is None:
             return
+        if context.metadata.get("protocol_fsm_allowed") is False:
+            reason = context.metadata.get(
+                "protocol_fsm_reason",
+                "protocol_state_denied",
+            )
+            raise ValueError(
+                f"protocol reply blocked by protocol state machine: {reason}"
+            )
         if context.transaction_id is not None:
             event_transaction_id = _parse_optional_u16(context.transaction_id)
             if (

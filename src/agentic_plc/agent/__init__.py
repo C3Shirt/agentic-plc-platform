@@ -20,6 +20,15 @@ from agentic_plc.agent.protocol_interaction import (
     ProtocolAddressRange,
     ProtocolIntentTracker,
 )
+from agentic_plc.agent.protocol_state_machine import (
+    ModbusTcpStateMachine,
+    ProtocolSessionPhase,
+    ProtocolSessionState,
+    ProtocolStateMachine,
+    ProtocolStateMachineRegistry,
+    ProtocolTransitionDecision,
+    ProtocolTransitionStatus,
+)
 from agentic_plc.agent.response_policy import (
     ProcessAwareResponsePolicy,
     ProtocolStrategyPlanner,
@@ -52,9 +61,16 @@ __all__ = [
     "PhysicalProcessContext",
     "ProcessAwareResponsePolicy",
     "ProcessContextCompressor",
+    "ModbusTcpStateMachine",
     "ProtocolAddressRange",
     "ProtocolIntentTracker",
+    "ProtocolSessionPhase",
+    "ProtocolSessionState",
+    "ProtocolStateMachine",
+    "ProtocolStateMachineRegistry",
     "ProtocolStrategyPlanner",
+    "ProtocolTransitionDecision",
+    "ProtocolTransitionStatus",
     "RejectedPlan",
     "RuleBasedDeceptionPlanner",
     "WorldPatch",

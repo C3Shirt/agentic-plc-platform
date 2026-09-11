@@ -10,6 +10,10 @@ from agentic_plc.agent.protocol_interaction import (
     ActorProtocolState,
     ProtocolIntentTracker,
 )
+from agentic_plc.agent.protocol_state_machine import (
+    ProtocolSessionState,
+    ProtocolStateMachineRegistry,
+)
 from agentic_plc.agent.response_policy import ProcessAwareResponsePolicy
 from agentic_plc.contracts.events import ICSEvent
 from agentic_plc.world.model import TankPumpWorld
@@ -26,6 +30,7 @@ class EventStoreLike(Protocol):
 @dataclass(frozen=True, slots=True)
 class AgentRuntimeConfig:
     decision_window: int = 20
+    enrich_protocol_fsm: bool = True
     enrich_protocol_state: bool = True
 
 
@@ -41,12 +46,17 @@ class AgentRuntime:
     protocol_tracker: ProtocolIntentTracker = field(
         default_factory=ProtocolIntentTracker
     )
+    protocol_state_machine: ProtocolStateMachineRegistry = field(
+        default_factory=ProtocolStateMachineRegistry
+    )
     decisions: list[AgentDecision] = field(default_factory=list)
 
     def observe(self, event: ICSEvent) -> ICSEvent:
         observed_event = event
+        if self.config.enrich_protocol_fsm:
+            _, observed_event = self.protocol_state_machine.observe(observed_event)
         if self.config.enrich_protocol_state:
-            _, observed_event = self.protocol_tracker.observe(event)
+            _, observed_event = self.protocol_tracker.observe(observed_event)
         if self.event_store is not None:
             self.event_store.append(observed_event)
         return observed_event
@@ -78,3 +88,11 @@ class AgentRuntime:
         protocol: str,
     ) -> ActorProtocolState | None:
         return self.protocol_tracker.state_for(actor_id, protocol)
+
+    def protocol_session_state_for(
+        self,
+        actor_id: str,
+        protocol: str,
+        session_id: str,
+    ) -> ProtocolSessionState | None:
+        return self.protocol_state_machine.state_for(actor_id, protocol, session_id)
