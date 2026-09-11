@@ -6,7 +6,9 @@ from pathlib import Path
 
 from agentic_plc.evaluation import (
     ConsistencyBenchmarkRunner,
+    benchmark_cases_to_payload,
     build_default_modbus_consistency_cases,
+    write_benchmark_payload,
 )
 
 
@@ -30,7 +32,7 @@ def main() -> int:
 
     cases = build_default_modbus_consistency_cases()
     if args.cases_only:
-        payload = {"cases": [case.to_dict() for case in cases]}
+        payload = benchmark_cases_to_payload(cases)
     else:
         payload = {
             "cases": [case.to_dict() for case in cases],
@@ -39,8 +41,7 @@ def main() -> int:
 
     text = json.dumps(payload, indent=2, sort_keys=True)
     if args.output is not None:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(text + "\n", encoding="utf-8")
+        write_benchmark_payload(args.output, payload)
     print(text)
     return 0
 

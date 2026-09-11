@@ -79,6 +79,7 @@ public dataset trace/pcap
 -> ICSEvent sequence
 -> expected ProtocolStateMachine status
 -> expected PhysicalProcessContext state/reply
+-> benchmark JSON artifact
 -> BenchmarkReport
 ```
 
@@ -115,6 +116,14 @@ python tools\import_cic_modbus_benchmark.py `
   --attack-log records\cic_modbus_attack_log.csv `
   --run `
   --output records\cic_modbus_benchmark.json
+```
+
+Imported or hand-authored JSON artifacts can be replayed independently:
+
+```powershell
+python tools\run_consistency_benchmark.py `
+  --input records\cic_modbus_benchmark.json `
+  --output records\cic_modbus_report.json
 ```
 
 What this gives us now:
