@@ -102,6 +102,27 @@ class AgenticModbusDatabankTests(unittest.TestCase):
         self.assertEqual(logdata["mode"], "tcp")
         self.assertEqual(inner.calls, 1)
 
+    def test_agentic_databank_falls_back_for_unmapped_bit_read(self) -> None:
+        inner = FakeDatabank()
+        event_log = InMemoryEventLog()
+        runtime = AgentRuntime(
+            world=TankPumpWorld(),
+            planner=RuleBasedDeceptionPlanner(),
+            event_store=event_log,
+        )
+        databank = AgenticModbusDatabank(inner, runtime)
+
+        response, logdata = databank.handle_request(
+            query=None,
+            request=read_coils_request(transaction_id=19, unit_id=1),
+            mode="tcp",
+        )
+
+        self.assertEqual(response, b"fallback")
+        self.assertEqual(logdata["mode"], "tcp")
+        self.assertEqual(inner.calls, 1)
+        self.assertEqual(event_log.list_events()[0].operation, "read_coils")
+
     def test_install_agentic_modbus_hook_wraps_server_databank(self) -> None:
         server = FakeServer()
         runtime = AgentRuntime(world=TankPumpWorld())
@@ -181,6 +202,10 @@ class AgenticModbusDatabankTests(unittest.TestCase):
 
 def read_holding_register_request(transaction_id: int, unit_id: int) -> bytes:
     return _frame(transaction_id, unit_id, bytes.fromhex("03 00 00 00 02"))
+
+
+def read_coils_request(transaction_id: int, unit_id: int) -> bytes:
+    return _frame(transaction_id, unit_id, bytes.fromhex("01 00 00 00 02"))
 
 
 def write_single_register_request(transaction_id: int, unit_id: int) -> bytes:

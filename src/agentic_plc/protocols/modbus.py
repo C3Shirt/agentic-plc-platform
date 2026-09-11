@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 
 class ModbusFrameError(ValueError):
@@ -70,6 +71,8 @@ def parse_modbus_tcp_request(payload: bytes | str) -> ModbusTcpRequest:
         address = int.from_bytes(data[0:2], "big")
         count = 1
         values = (int.from_bytes(data[2:4], "big"),)
+        if function_code == 5 and values[0] not in {0x0000, 0xFF00}:
+            raise ModbusFrameError("single-coil write value must be 0x0000 or 0xff00")
     elif function_code in {15, 16}:
         if len(data) < 5:
             raise ModbusFrameError("multiple-write request is too short")
@@ -82,6 +85,8 @@ def parse_modbus_tcp_request(payload: bytes | str) -> ModbusTcpRequest:
         if count <= 0:
             raise ModbusFrameError("multiple-write count must be positive")
         if function_code == 15:
+            if count > 1968:
+                raise ModbusFrameError("multiple-coil write count is too large")
             if byte_count != (count + 7) // 8:
                 raise ModbusFrameError("multiple-coil byte count is invalid")
             values = _unpack_coils(packed_values, count)
@@ -150,6 +155,85 @@ def build_modbus_tcp_read_registers_response(
     return _build_frame(transaction_id=transaction_id, unit_id=unit_id, pdu=bytes(data))
 
 
+def build_modbus_tcp_read_bits_response(
+    transaction_id: int,
+    unit_id: int,
+    function_code: int,
+    values: Sequence[int | bool],
+) -> str:
+    if function_code not in {1, 2}:
+        raise ModbusFrameError("read-bit response function_code must be 1 or 2")
+    if not values:
+        raise ModbusFrameError("read-bit response requires at least one value")
+    if len(values) > 2000:
+        raise ModbusFrameError("read-bit response supports at most 2000 bits")
+    packed = bytearray()
+    for offset in range(0, len(values), 8):
+        byte_value = 0
+        for bit, value in enumerate(values[offset : offset + 8]):
+            if int(bool(value)):
+                byte_value |= 1 << bit
+        packed.append(byte_value)
+    return _build_frame(
+        transaction_id=transaction_id,
+        unit_id=unit_id,
+        pdu=bytes([function_code, len(packed), *packed]),
+    )
+
+
+def build_modbus_tcp_write_single_response(
+    transaction_id: int,
+    unit_id: int,
+    function_code: int,
+    address: int,
+    value: int | bool,
+) -> str:
+    if function_code not in {5, 6}:
+        raise ModbusFrameError("single-write response function_code must be 5 or 6")
+    _validate_u16(address, "address")
+    encoded_value = _normalize_single_write_value(function_code, value)
+    return _build_frame(
+        transaction_id=transaction_id,
+        unit_id=unit_id,
+        pdu=bytes(
+            [
+                function_code,
+                *_u16_bytes(address),
+                *_u16_bytes(encoded_value),
+            ]
+        ),
+    )
+
+
+def build_modbus_tcp_write_multiple_response(
+    transaction_id: int,
+    unit_id: int,
+    function_code: int,
+    address: int,
+    count: int,
+) -> str:
+    if function_code not in {15, 16}:
+        raise ModbusFrameError("multiple-write response function_code must be 15 or 16")
+    _validate_u16(address, "address")
+    if count <= 0:
+        raise ModbusFrameError("multiple-write response count must be positive")
+    if function_code == 15 and count > 1968:
+        raise ModbusFrameError("multiple-coil write response count is too large")
+    if function_code == 16 and count > 123:
+        raise ModbusFrameError("multiple-register write response count is too large")
+    return _build_frame(
+        transaction_id=transaction_id,
+        unit_id=unit_id,
+        pdu=bytes(
+            [
+                function_code,
+                *_u16_bytes(address),
+                *_u16_bytes(count),
+            ]
+        ),
+    )
+
+
 def build_modbus_tcp_exception_response(
     transaction_id: int,
     unit_id: int,
@@ -165,6 +249,67 @@ def build_modbus_tcp_exception_response(
         unit_id=unit_id,
         pdu=bytes([function_code | 0x80, exception_code]),
     )
+
+
+def build_modbus_tcp_response_from_request(
+    request: ModbusTcpRequest | bytes | str,
+    *,
+    values: Sequence[int | bool] | None = None,
+    exception_code: int | None = None,
+) -> str:
+    parsed = (
+        request
+        if isinstance(request, ModbusTcpRequest)
+        else parse_modbus_tcp_request(request)
+    )
+    if exception_code is not None:
+        return build_modbus_tcp_exception_response(
+            transaction_id=parsed.transaction_id,
+            unit_id=parsed.unit_id,
+            function_code=parsed.function_code,
+            exception_code=exception_code,
+        )
+    if parsed.function_code in {1, 2}:
+        if values is None:
+            raise ModbusFrameError("read-bit response requires values")
+        _validate_response_value_count(parsed, values)
+        return build_modbus_tcp_read_bits_response(
+            transaction_id=parsed.transaction_id,
+            unit_id=parsed.unit_id,
+            function_code=parsed.function_code,
+            values=values,
+        )
+    if parsed.function_code in {3, 4}:
+        if values is None:
+            raise ModbusFrameError("read-register response requires values")
+        _validate_response_value_count(parsed, values)
+        return build_modbus_tcp_read_registers_response(
+            transaction_id=parsed.transaction_id,
+            unit_id=parsed.unit_id,
+            function_code=parsed.function_code,
+            values=[int(value) for value in values],
+        )
+    if parsed.function_code in {5, 6}:
+        if parsed.address is None or not parsed.values:
+            raise ModbusFrameError("single-write request is missing address/value")
+        return build_modbus_tcp_write_single_response(
+            transaction_id=parsed.transaction_id,
+            unit_id=parsed.unit_id,
+            function_code=parsed.function_code,
+            address=parsed.address,
+            value=parsed.values[0],
+        )
+    if parsed.function_code in {15, 16}:
+        if parsed.address is None or parsed.count is None:
+            raise ModbusFrameError("multiple-write request is missing address/count")
+        return build_modbus_tcp_write_multiple_response(
+            transaction_id=parsed.transaction_id,
+            unit_id=parsed.unit_id,
+            function_code=parsed.function_code,
+            address=parsed.address,
+            count=parsed.count,
+        )
+    raise ModbusFrameError(f"unsupported Modbus function: {parsed.function_code}")
 
 
 def _validate_function(function_code: int, data: bytes) -> None:
@@ -210,6 +355,39 @@ def _build_frame(transaction_id: int, unit_id: int, pdu: bytes) -> str:
     raw.append(int(unit_id))
     raw.extend(pdu)
     return raw.hex()
+
+
+def _normalize_single_write_value(function_code: int, value: int | bool) -> int:
+    if function_code == 5:
+        if isinstance(value, bool):
+            return 0xFF00 if value else 0x0000
+        normalized = int(value)
+        if normalized in {0, 1}:
+            return 0xFF00 if normalized else 0x0000
+        if normalized not in {0x0000, 0xFF00}:
+            raise ModbusFrameError("single-coil response value must be 0x0000 or 0xff00")
+        return normalized
+    return _validate_u16(int(value), "register value")
+
+
+def _validate_u16(value: int, name: str) -> int:
+    normalized = int(value)
+    if not 0 <= normalized <= 65535:
+        raise ModbusFrameError(f"{name} must fit in uint16")
+    return normalized
+
+
+def _u16_bytes(value: int) -> tuple[int, int]:
+    normalized = _validate_u16(value, "value")
+    return tuple(normalized.to_bytes(2, "big"))
+
+
+def _validate_response_value_count(
+    request: ModbusTcpRequest,
+    values: Sequence[int | bool],
+) -> None:
+    if request.count is not None and len(values) != request.count:
+        raise ModbusFrameError("response value count must match request count")
 
 
 def _clean_hex(payload_hex: str) -> str:

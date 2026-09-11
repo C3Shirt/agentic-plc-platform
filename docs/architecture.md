@@ -145,6 +145,12 @@ protocol interaction phases, and `ProcessAwareResponsePolicy` can add bounded
 deception plans for address probing, register mapping, write attempts, and
 write-effect verification without changing the deterministic protocol fallback.
 
+Current status: generated Modbus TCP responses now have builders for read-bit
+responses, read-register responses, single-write echoes, multiple-write echoes,
+and exception responses. `ProtocolReplyValidator` checks that generated response
+frames match the latest request's transaction id, unit id, function code, read
+byte count, and write echo fields before an adapter can send them.
+
 ### P5 - Evaluation
 
 Compare original Conpot, deterministic world model, and agentic world model using

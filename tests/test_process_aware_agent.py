@@ -12,9 +12,11 @@ from agentic_plc.agent import (
 from agentic_plc.contracts.actions import AgentProposal, WorldPatch, WorldPatchOperation
 from agentic_plc.contracts.events import ICSEvent, Intent
 from agentic_plc.processes import (
+    ProcessVariable,
     ProcessRegisterMap,
     ScenarioMapping,
     TennesseeEastmanTraceBackend,
+    TraceProcessBackend,
 )
 from agentic_plc.protocols.modbus import parse_modbus_tcp_frame
 
@@ -108,6 +110,33 @@ class ProcessAwareAgentTests(unittest.TestCase):
         patched_path = decision.world_patches[0].patch.operations[0].path
         self.assertEqual(context.backend.read(patched_path), 42.0)
 
+    def test_rule_planner_generates_bit_read_reply_from_process_snapshot(self) -> None:
+        context = _binary_process_context()
+        event = ICSEvent(
+            protocol="modbus",
+            session_id="s1",
+            source_ip="192.0.2.10",
+            actor_id="actor-1",
+            intent=Intent.READ_PROCESS,
+            operation="read_coils",
+            transaction_id="19",
+            unit_id=1,
+            address=0,
+            count=2,
+            result="observed",
+            metadata={"function_code": 1},
+        )
+
+        decision = AgentController(
+            RuleBasedDeceptionPlanner(),
+            process_context=context,
+        ).run_once([event])
+
+        self.assertEqual(decision.rejected, [])
+        frame = parse_modbus_tcp_frame(decision.protocol_replies[0].payload_hex)
+        self.assertEqual(frame.function_code, 1)
+        self.assertEqual(frame.data, bytes.fromhex("01 01"))
+
 
 def _process_context() -> PhysicalProcessContext:
     with tempfile.TemporaryDirectory() as directory:
@@ -119,6 +148,63 @@ def _process_context() -> PhysicalProcessContext:
         backend = TennesseeEastmanTraceBackend.from_directory(trace_dir)
     scenario = ScenarioMapping.from_file(
         Path("scenarios/tennessee_eastman/scenario.json")
+    )
+    register_map = ProcessRegisterMap(backend, scenario)
+    return PhysicalProcessContext(
+        backend=backend,
+        scenario=scenario,
+        register_map=register_map,
+    )
+
+
+def _binary_process_context() -> PhysicalProcessContext:
+    backend = TraceProcessBackend(
+        process_id="binary_process",
+        name="binary_trace",
+        time_seconds=[0.0],
+        variables=[
+            ProcessVariable(
+                variable_id="pump_running",
+                name="Pump running",
+                role="measurement",
+            ),
+            ProcessVariable(
+                variable_id="alarm_active",
+                name="Alarm active",
+                role="measurement",
+            ),
+        ],
+        series={
+            "pump_running": (1.0,),
+            "alarm_active": (0.0,),
+        },
+    )
+    scenario = ScenarioMapping.from_dict(
+        {
+            "scenario_id": "binary_plc_slice",
+            "process_id": "binary_process",
+            "backend": {"type": "trace"},
+            "plc_area": "binary_cell",
+            "description": "binary PLC slice for bit response tests",
+            "points": [
+                {
+                    "variable_id": "pump_running",
+                    "protocol": "modbus",
+                    "table": "coils",
+                    "address": 0,
+                    "access": "read",
+                    "data_type": "bool",
+                },
+                {
+                    "variable_id": "alarm_active",
+                    "protocol": "modbus",
+                    "table": "coils",
+                    "address": 1,
+                    "access": "read",
+                    "data_type": "bool",
+                },
+            ],
+        }
     )
     register_map = ProcessRegisterMap(backend, scenario)
     return PhysicalProcessContext(

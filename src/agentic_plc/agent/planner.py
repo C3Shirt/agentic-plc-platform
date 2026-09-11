@@ -17,7 +17,10 @@ from agentic_plc.contracts.actions import (
     WorldPatchOperation,
 )
 from agentic_plc.contracts.events import DeceptionPlan, ICSEvent, Intent
-from agentic_plc.protocols.modbus import build_modbus_tcp_read_registers_response
+from agentic_plc.protocols.modbus import (
+    build_modbus_tcp_read_bits_response,
+    build_modbus_tcp_read_registers_response,
+)
 from agentic_plc.telemetry.serialization import event_to_dict
 
 
@@ -52,23 +55,34 @@ class RuleBasedDeceptionPlanner:
         if latest.intent is Intent.READ_PROCESS and latest.transaction_id:
             unit_id = latest.unit_id if latest.unit_id is not None else 1
             function_code = int(latest.metadata.get("function_code", 3))
-            if function_code not in {3, 4}:
-                function_code = 3
             count = int(latest.count or 2)
             values = self._process_values_for_read(context, latest)
-            if values is None:
-                values = ([500, 120] + [0] * max(0, count - 2))[:count]
+            if function_code in {1, 2}:
+                if values is None:
+                    return None
+                payload_hex = build_modbus_tcp_read_bits_response(
+                    transaction_id=int(str(latest.transaction_id), 0),
+                    unit_id=unit_id,
+                    function_code=function_code,
+                    values=values[:count],
+                )
+            elif function_code in {3, 4}:
+                if values is None:
+                    values = ([500, 120] + [0] * max(0, count - 2))[:count]
+                payload_hex = build_modbus_tcp_read_registers_response(
+                    transaction_id=int(str(latest.transaction_id), 0),
+                    unit_id=unit_id,
+                    function_code=function_code,
+                    values=values,
+                )
+            else:
+                return None
             return AgentProposal(
                 protocol_reply=ProtocolReply(
                     protocol="modbus_tcp",
                     transaction_id=str(latest.transaction_id),
                     unit_id=unit_id,
-                    payload_hex=build_modbus_tcp_read_registers_response(
-                        transaction_id=int(str(latest.transaction_id), 0),
-                        unit_id=unit_id,
-                        function_code=function_code,
-                        values=values,
-                    ),
+                    payload_hex=payload_hex,
                     reason="Return a plausible generated Modbus process snapshot.",
                 )
             )
