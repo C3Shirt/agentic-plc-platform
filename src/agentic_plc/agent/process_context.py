@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from agentic_plc.contracts.actions import WorldPatch, WorldPatchOperation
 from agentic_plc.contracts.events import ICSEvent
 from agentic_plc.processes import ProcessBackend, ProcessRegisterMap, ScenarioMapping
 from agentic_plc.processes.base import ProcessSnapshot
@@ -132,6 +133,56 @@ class PhysicalProcessContext:
             return None
         return self.register_map.read(area, event.address, event.count)
 
+    def world_patch_for_modbus_write_event(self, event: ICSEvent) -> WorldPatch | None:
+        """Translate a Modbus write into a validated process-variable patch.
+
+        This method does not mutate the backend. It only uses the scenario's
+        protocol mapping to decode attacker-facing cells into canonical process
+        variables and engineering values. The controller still applies the
+        returned patch through `ProcessPatchApplier`.
+        """
+
+        if self.register_map is None:
+            return None
+        area = _register_area_for_event(event)
+        if area not in {RegisterArea.COILS, RegisterArea.HOLDING_REGISTERS}:
+            return None
+        if event.address is None:
+            return None
+        values = _write_values_for_event(event)
+        if not values:
+            return None
+        plans = self.register_map.preview_write_many(area, event.address, values)
+        if not plans:
+            return None
+        return WorldPatch(
+            actor_id=event.actor_id or f"ip:{event.source_ip}",
+            reason=(
+                "Apply protocol write to mapped physical-process variables "
+                "before acknowledging the write."
+            ),
+            ttl_seconds=60,
+            operations=[
+                WorldPatchOperation(
+                    path=plan.variable_id,
+                    value=plan.engineering_value,
+                    reason=(
+                        f"Decoded {plan.area.value}:{plan.address} "
+                        f"requested={plan.requested_value}."
+                    ),
+                )
+                for plan in plans
+            ],
+            metadata={
+                "source_protocol": "modbus",
+                "transaction_id": event.transaction_id,
+                "unit_id": event.unit_id,
+                "operation": event.operation,
+                "address": event.address,
+                "count": event.count,
+            },
+        )
+
     def to_prompt_dict(self) -> dict[str, Any]:
         snapshot = self.snapshot()
         exposed = self.exposed_points()[: self.max_prompt_points]
@@ -178,3 +229,13 @@ def _register_area_for_event(event: ICSEvent) -> RegisterArea | None:
         15: RegisterArea.COILS,
         16: RegisterArea.HOLDING_REGISTERS,
     }.get(function_code)
+
+
+def _write_values_for_event(event: ICSEvent) -> list[int | bool] | None:
+    if event.requested_value is None:
+        return None
+    if isinstance(event.requested_value, list):
+        return list(event.requested_value)
+    if isinstance(event.requested_value, tuple):
+        return list(event.requested_value)
+    return [event.requested_value]

@@ -75,7 +75,9 @@ deterministic response path.
   `TennesseeEastmanTraceBackend` adapts TE `t/y/u/r.dat` files without coupling
   protocol adapters to TE-specific columns.
 - `ProcessRegisterMap` exposes any scenario-mapped backend as Modbus-style
-  register reads/writes.
+  register reads/writes. It can also preview a protocol write without mutating
+  the backend, so generated write acknowledgements can be paired with a
+  validated process-state patch.
 - `scenarios/tennessee_eastman/scenario.json` maps a bounded TE
   reactor/separator control cell to Modbus-facing points.
 - `ProcessContextCompressor` applies Process-Aware Context Compression (PACC)
@@ -162,6 +164,7 @@ python tools\smoke_process_aware_agent.py
 python tools\smoke_context_compressor.py
 python tools\smoke_protocol_interaction.py
 python tools\smoke_modbus_responses.py
+python tools\smoke_process_write_through.py
 ```
 
 The agent smoke uses the no-LLM planner by default and writes sample events to

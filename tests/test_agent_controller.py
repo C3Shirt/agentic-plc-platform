@@ -12,7 +12,10 @@ from agentic_plc.contracts.actions import (
     WorldPatchOperation,
 )
 from agentic_plc.contracts.events import DeceptionPlan, ICSEvent, Intent
-from agentic_plc.protocols.modbus import build_modbus_tcp_read_registers_response
+from agentic_plc.protocols.modbus import (
+    build_modbus_tcp_read_registers_response,
+    build_modbus_tcp_write_single_response,
+)
 from agentic_plc.world import TankPumpWorld
 
 
@@ -40,6 +43,25 @@ class ProtocolReplyPlanner:
                 transaction_id="17",
                 unit_id=1,
                 reason="generated read response",
+            )
+        )
+
+
+class WriteAckOnlyPlanner:
+    def propose(self, events: list[ICSEvent]) -> AgentProposal:
+        return AgentProposal(
+            protocol_reply=ProtocolReply(
+                protocol="modbus_tcp",
+                payload_hex=build_modbus_tcp_write_single_response(
+                    transaction_id=18,
+                    unit_id=1,
+                    function_code=6,
+                    address=5,
+                    value=700,
+                ),
+                transaction_id="18",
+                unit_id=1,
+                reason="write ack without state mutation",
             )
         )
 
@@ -112,6 +134,16 @@ class AgentControllerTests(unittest.TestCase):
         self.assertEqual(decision.rejected[0].kind, "protocol_reply")
         self.assertIn("transaction_id", decision.rejected[0].error)
 
+    def test_controller_withholds_generated_write_ack_without_world_patch(self) -> None:
+        decision = AgentController(WriteAckOnlyPlanner()).run_once(
+            [self._write_event(transaction_id="18", unit_id=1)]
+        )
+
+        self.assertFalse(decision.has_action)
+        self.assertEqual(decision.protocol_replies, [])
+        self.assertEqual(decision.rejected[0].kind, "protocol_reply")
+        self.assertIn("world patch", decision.rejected[0].error)
+
     def test_controller_rejects_invalid_world_patch(self) -> None:
         decision = AgentController(BadWorldPatchPlanner(), world=TankPumpWorld()).run_once(
             [self._event(Intent.READ_PROCESS)]
@@ -172,6 +204,24 @@ class AgentControllerTests(unittest.TestCase):
             requested_value=requested_value,
             result="accepted",
             world_revision=1,
+        )
+
+    def _write_event(self, transaction_id: str, unit_id: int) -> ICSEvent:
+        return ICSEvent(
+            protocol="modbus",
+            session_id="s1",
+            source_ip="192.0.2.10",
+            actor_id="actor-1",
+            intent=Intent.CONTROL_OUTPUT,
+            operation="write_single_register",
+            transaction_id=transaction_id,
+            unit_id=unit_id,
+            address=5,
+            count=1,
+            requested_value=700,
+            result="observed",
+            world_revision=1,
+            metadata={"function_code": 6},
         )
 
     def _read_event(self, transaction_id: str, unit_id: int) -> ICSEvent:

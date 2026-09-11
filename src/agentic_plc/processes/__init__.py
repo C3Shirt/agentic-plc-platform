@@ -7,7 +7,12 @@ from .base import (
 )
 from .patch import ProcessPatchApplier, ProcessPatchPolicy
 from .registry import ProcessBackendRegistry
-from .registers import ProcessRegisterMap
+from .registers import (
+    ProcessRegisterMap,
+    ProcessRegisterReadOnlyError,
+    ProcessRegisterWriteError,
+    ProcessRegisterWritePlan,
+)
 from .scenario import ProtocolPointMapping, ScenarioMapping
 from .tennessee_eastman import TennesseeEastmanTraceBackend
 from .trace import TraceProcessBackend
@@ -18,6 +23,9 @@ __all__ = [
     "ProcessPatchApplier",
     "ProcessPatchPolicy",
     "ProcessRegisterMap",
+    "ProcessRegisterReadOnlyError",
+    "ProcessRegisterWriteError",
+    "ProcessRegisterWritePlan",
     "ProcessSnapshot",
     "ProcessVariable",
     "ProtocolPointMapping",

@@ -1,12 +1,37 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from agentic_plc.contracts.events import Intent
 from agentic_plc.world.registers import RegisterAccessError, RegisterArea, RegisterWrite
 
 from .base import ProcessBackend
 from .scenario import ProtocolPointMapping, ScenarioMapping
+
+
+class ProcessRegisterWriteError(RegisterAccessError):
+    """Raised when a process-mapped register write cannot be represented safely."""
+
+
+class ProcessRegisterReadOnlyError(ProcessRegisterWriteError):
+    """Raised when a protocol write targets a read-only process variable."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessRegisterWritePlan:
+    """A non-mutating interpretation of one protocol write.
+
+    The plan bridges protocol-facing cells and canonical process variables. It
+    lets an agent/controller decide whether to accept a Modbus write before the
+    physical-process backend is mutated.
+    """
+
+    area: RegisterArea
+    address: int
+    variable_id: str
+    requested_value: int
+    engineering_value: float
 
 
 class ProcessRegisterMap:
@@ -43,24 +68,15 @@ class ProcessRegisterMap:
     def write(
         self, area: RegisterArea | str, address: int, value: int | bool
     ) -> RegisterWrite:
-        area = RegisterArea(area)
-        self._validate_range(area, address, 1)
-        if area not in {RegisterArea.COILS, RegisterArea.HOLDING_REGISTERS}:
-            raise RegisterAccessError(f"{area.value} is read-only")
-        point = self._point_at(area, address)
-        if "write" not in point.access:
-            raise RegisterAccessError(f"{point.variable_id} is read-only")
-
-        requested_value = self._normalize_cell(area, value)
+        plan = self.preview_write(area, address, value)
         previous_value = self.read(area, address)[0]
-        engineering_value = self._decode_cell(point, requested_value)
-        self.backend.write(point.variable_id, engineering_value)
+        self.backend.write(plan.variable_id, plan.engineering_value)
         resulting_value = self.read(area, address)[0]
         return RegisterWrite(
-            area=area,
+            area=plan.area,
             address=address,
             previous_value=previous_value,
-            requested_value=requested_value,
+            requested_value=plan.requested_value,
             resulting_value=resulting_value,
             world_revision=self.backend.snapshot().revision,
         )
@@ -68,10 +84,61 @@ class ProcessRegisterMap:
     def write_many(
         self, area: RegisterArea | str, address: int, values: Iterable[int | bool]
     ) -> list[RegisterWrite]:
+        plans = self.preview_write_many(area, address, values)
         writes: list[RegisterWrite] = []
-        for offset, value in enumerate(values):
-            writes.append(self.write(area, address + offset, value))
+        for plan in plans:
+            previous_value = self.read(plan.area, plan.address)[0]
+            self.backend.write(plan.variable_id, plan.engineering_value)
+            resulting_value = self.read(plan.area, plan.address)[0]
+            writes.append(
+                RegisterWrite(
+                    area=plan.area,
+                    address=plan.address,
+                    previous_value=previous_value,
+                    requested_value=plan.requested_value,
+                    resulting_value=resulting_value,
+                    world_revision=self.backend.snapshot().revision,
+                )
+            )
         return writes
+
+    def preview_write(
+        self, area: RegisterArea | str, address: int, value: int | bool
+    ) -> ProcessRegisterWritePlan:
+        """Decode one protocol write without mutating the process backend."""
+
+        area = RegisterArea(area)
+        self._validate_range(area, address, 1)
+        if area not in {RegisterArea.COILS, RegisterArea.HOLDING_REGISTERS}:
+            raise ProcessRegisterReadOnlyError(f"{area.value} is read-only")
+        point = self._point_at(area, address)
+        if "write" not in point.access:
+            raise ProcessRegisterReadOnlyError(f"{point.variable_id} is read-only")
+
+        requested_value = self._normalize_cell(area, value)
+        engineering_value = self._decode_cell(point, requested_value)
+        self._validate_engineering_value(point, engineering_value)
+        return ProcessRegisterWritePlan(
+            area=area,
+            address=address,
+            variable_id=point.variable_id,
+            requested_value=requested_value,
+            engineering_value=engineering_value,
+        )
+
+    def preview_write_many(
+        self, area: RegisterArea | str, address: int, values: Iterable[int | bool]
+    ) -> list[ProcessRegisterWritePlan]:
+        """Decode multiple protocol writes without mutating the process backend."""
+
+        area = RegisterArea(area)
+        values = tuple(values)
+        if not values:
+            raise ProcessRegisterWriteError("process register write requires values")
+        return [
+            self.preview_write(area, address + offset, value)
+            for offset, value in enumerate(values)
+        ]
 
     def intent_for_write(self, area: RegisterArea | str, address: int) -> Intent:
         area = RegisterArea(area)
@@ -150,6 +217,21 @@ class ProcessRegisterMap:
         if point.scale == 0:
             raise RegisterAccessError(f"{point.variable_id} has zero scale")
         return float(raw_value) / point.scale
+
+    def _validate_engineering_value(
+        self,
+        point: ProtocolPointMapping,
+        engineering_value: float,
+    ) -> None:
+        variable = self.backend.variables[point.variable_id]
+        if variable.minimum is not None and engineering_value < variable.minimum:
+            raise ProcessRegisterWriteError(
+                f"{point.variable_id} must be >= {variable.minimum}"
+            )
+        if variable.maximum is not None and engineering_value > variable.maximum:
+            raise ProcessRegisterWriteError(
+                f"{point.variable_id} must be <= {variable.maximum}"
+            )
 
     def _normalize_cell(self, area: RegisterArea, value: int | bool) -> int:
         if area is RegisterArea.COILS:

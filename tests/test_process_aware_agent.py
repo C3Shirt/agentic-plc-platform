@@ -9,7 +9,12 @@ from agentic_plc.agent import (
     PhysicalProcessContext,
     RuleBasedDeceptionPlanner,
 )
-from agentic_plc.contracts.actions import AgentProposal, WorldPatch, WorldPatchOperation
+from agentic_plc.contracts.actions import (
+    AgentProposal,
+    ProtocolReply,
+    WorldPatch,
+    WorldPatchOperation,
+)
 from agentic_plc.contracts.events import ICSEvent, Intent
 from agentic_plc.processes import (
     ProcessVariable,
@@ -18,7 +23,10 @@ from agentic_plc.processes import (
     TennesseeEastmanTraceBackend,
     TraceProcessBackend,
 )
-from agentic_plc.protocols.modbus import parse_modbus_tcp_frame
+from agentic_plc.protocols.modbus import (
+    build_modbus_tcp_write_single_response,
+    parse_modbus_tcp_frame,
+)
 
 
 class ProcessPatchPlanner:
@@ -40,6 +48,40 @@ class ProcessPatchPlanner:
                     )
                 ],
             )
+        )
+
+
+class WrongWritePatchPlanner:
+    def propose(
+        self,
+        events: list[ICSEvent],
+        context: PhysicalProcessContext | None = None,
+    ) -> AgentProposal:
+        return AgentProposal(
+            protocol_reply=ProtocolReply(
+                protocol="modbus_tcp",
+                payload_hex=build_modbus_tcp_write_single_response(
+                    transaction_id=18,
+                    unit_id=1,
+                    function_code=6,
+                    address=5,
+                    value=420,
+                ),
+                transaction_id="18",
+                unit_id=1,
+                reason="acknowledge write with mismatched patch",
+            ),
+            world_patch=WorldPatch(
+                actor_id="actor-1",
+                reason="wrong process mutation",
+                operations=[
+                    WorldPatchOperation(
+                        path="xmv_09",
+                        value=42.0,
+                        reason="does not correspond to the requested register",
+                    )
+                ],
+            ),
         )
 
 
@@ -109,6 +151,51 @@ class ProcessAwareAgentTests(unittest.TestCase):
         self.assertEqual(len(decision.world_patches), 1)
         patched_path = decision.world_patches[0].patch.operations[0].path
         self.assertEqual(context.backend.read(patched_path), 42.0)
+
+    def test_process_context_builds_world_patch_for_mapped_modbus_write(self) -> None:
+        context = _process_context()
+        event = _te_write_event()
+
+        patch = context.world_patch_for_modbus_write_event(event)
+
+        assert patch is not None
+        self.assertEqual(patch.operations[0].path, "xmv_10")
+        self.assertEqual(patch.operations[0].value, 42.0)
+        self.assertEqual(context.backend.read("xmv_10"), 10.0)
+
+    def test_rule_planner_generates_write_ack_and_process_patch(self) -> None:
+        context = _process_context()
+        event = _te_write_event()
+
+        decision = AgentController(
+            RuleBasedDeceptionPlanner(),
+            process_context=context,
+        ).run_once([event])
+
+        self.assertEqual(decision.rejected, [])
+        self.assertEqual(len(decision.protocol_replies), 1)
+        self.assertEqual(len(decision.world_patches), 1)
+        frame = parse_modbus_tcp_frame(decision.protocol_replies[0].payload_hex)
+        self.assertEqual(frame.function_code, 6)
+        self.assertEqual(frame.data, bytes.fromhex("000501a4"))
+        self.assertEqual(context.backend.read("xmv_10"), 42.0)
+
+    def test_controller_withholds_write_ack_when_patch_does_not_match_write(
+        self,
+    ) -> None:
+        context = _process_context()
+        event = _te_write_event()
+
+        decision = AgentController(
+            WrongWritePatchPlanner(),
+            process_context=context,
+        ).run_once([event])
+
+        self.assertEqual(decision.protocol_replies, [])
+        self.assertEqual(decision.world_patches, [])
+        self.assertEqual(context.backend.read("xmv_09"), 9.0)
+        self.assertTrue(any(plan.kind == "world_patch" for plan in decision.rejected))
+        self.assertTrue(any(plan.kind == "protocol_reply" for plan in decision.rejected))
 
     def test_rule_planner_generates_bit_read_reply_from_process_snapshot(self) -> None:
         context = _binary_process_context()
@@ -212,6 +299,36 @@ def _binary_process_context() -> PhysicalProcessContext:
         scenario=scenario,
         register_map=register_map,
     )
+
+
+def _te_write_event() -> ICSEvent:
+    request_hex = _modbus_frame_hex(18, 1, bytes.fromhex("06 00 05 01 a4"))
+    return ICSEvent(
+        protocol="modbus",
+        session_id="s1",
+        source_ip="192.0.2.10",
+        actor_id="actor-1",
+        intent=Intent.CONTROL_OUTPUT,
+        operation="write_single_register",
+        transaction_id="18",
+        unit_id=1,
+        address=5,
+        count=1,
+        requested_value=420,
+        result="observed",
+        metadata={"function_code": 6, "request_hex": request_hex},
+    )
+
+
+def _modbus_frame_hex(transaction_id: int, unit_id: int, pdu: bytes) -> str:
+    length = 1 + len(pdu)
+    raw = bytearray()
+    raw.extend(transaction_id.to_bytes(2, "big"))
+    raw.extend((0).to_bytes(2, "big"))
+    raw.extend(length.to_bytes(2, "big"))
+    raw.append(unit_id)
+    raw.extend(pdu)
+    return bytes(raw).hex()
 
 
 def _row(start: float, count: int) -> list[float]:

@@ -18,8 +18,12 @@ from agentic_plc.contracts.actions import (
 )
 from agentic_plc.contracts.events import DeceptionPlan, ICSEvent, Intent
 from agentic_plc.protocols.modbus import (
+    ModbusFrameError,
     build_modbus_tcp_read_bits_response,
     build_modbus_tcp_read_registers_response,
+    build_modbus_tcp_response_from_request,
+    build_modbus_tcp_write_multiple_response,
+    build_modbus_tcp_write_single_response,
 )
 from agentic_plc.telemetry.serialization import event_to_dict
 
@@ -86,6 +90,11 @@ class RuleBasedDeceptionPlanner:
                     reason="Return a plausible generated Modbus process snapshot.",
                 )
             )
+
+        if latest.intent in {Intent.WRITE_SETPOINT, Intent.CONTROL_OUTPUT}:
+            write_proposal = self._process_write_proposal(context, latest, actor_id)
+            if write_proposal is not None:
+                return write_proposal
 
         if Intent.FILE_TRANSFER in intents:
             return AgentProposal(
@@ -166,6 +175,84 @@ class RuleBasedDeceptionPlanner:
             return context.values_for_modbus_event(event)
         except ValueError:
             return None
+
+    def _process_write_proposal(
+        self,
+        context: PhysicalProcessContext | None,
+        event: ICSEvent,
+        actor_id: str,
+    ) -> AgentProposal | None:
+        if context is None or event.transaction_id is None:
+            return None
+        try:
+            world_patch = context.world_patch_for_modbus_write_event(event)
+        except ValueError:
+            return None
+        if world_patch is None:
+            return None
+        payload_hex = self._modbus_write_ack_payload(event)
+        if payload_hex is None:
+            return None
+        return AgentProposal(
+            protocol_reply=ProtocolReply(
+                protocol="modbus_tcp",
+                transaction_id=str(event.transaction_id),
+                unit_id=event.unit_id if event.unit_id is not None else 1,
+                payload_hex=payload_hex,
+                reason=(
+                    "Acknowledge a mapped Modbus write after preparing the "
+                    "corresponding process-state patch."
+                ),
+                metadata={"requires_accepted_world_patch": True},
+            ),
+            world_patch=WorldPatch(
+                actor_id=actor_id,
+                reason=world_patch.reason,
+                ttl_seconds=world_patch.ttl_seconds,
+                operations=world_patch.operations,
+                metadata=world_patch.metadata,
+            ),
+        )
+
+    def _modbus_write_ack_payload(self, event: ICSEvent) -> str | None:
+        request_hex = event.metadata.get("request_hex")
+        if isinstance(request_hex, str) and request_hex.strip():
+            try:
+                return build_modbus_tcp_response_from_request(request_hex)
+            except ModbusFrameError:
+                return None
+
+        function_code = event.metadata.get("function_code")
+        if function_code is None:
+            return None
+        if event.address is None:
+            return None
+        unit_id = event.unit_id if event.unit_id is not None else 1
+        try:
+            transaction_id = int(str(event.transaction_id), 0)
+            function_code = int(function_code)
+            if function_code in {5, 6}:
+                values = _write_values_for_event(event)
+                if not values:
+                    return None
+                return build_modbus_tcp_write_single_response(
+                    transaction_id=transaction_id,
+                    unit_id=unit_id,
+                    function_code=function_code,
+                    address=event.address,
+                    value=values[0],
+                )
+            if function_code in {15, 16} and event.count is not None:
+                return build_modbus_tcp_write_multiple_response(
+                    transaction_id=transaction_id,
+                    unit_id=unit_id,
+                    function_code=function_code,
+                    address=event.address,
+                    count=event.count,
+                )
+        except (ValueError, ModbusFrameError):
+            return None
+        return None
 
 
 class OpenAICompatiblePlanner:
@@ -293,8 +380,10 @@ class OpenAICompatiblePlanner:
             "snapshot and exposed PLC points. For Modbus read_process events, "
             "protocol_reply must use protocol=modbus_tcp and include payload_hex, "
             "reason, transaction_id, unit_id. World patches may only use path "
-            "values from allowed_world_patch_paths. Do not invent unmapped PLC "
-            "addresses. Payload: "
+            "values from allowed_world_patch_paths. For a successful Modbus "
+            "write acknowledgement, include a world_patch that decodes the "
+            "requested register value into the exact mapped process variable "
+            "engineering value. Do not invent unmapped PLC addresses. Payload: "
             + json.dumps(
                 {
                     "allowed_world_patch_paths": writable_paths,
@@ -464,3 +553,13 @@ def _parse_world_patch(payload: dict[str, object]) -> WorldPatch | None:
         ],
         metadata=dict(payload.get("metadata", {})),
     )
+
+
+def _write_values_for_event(event: ICSEvent) -> list[object] | None:
+    if event.requested_value is None:
+        return None
+    if isinstance(event.requested_value, list):
+        return list(event.requested_value)
+    if isinstance(event.requested_value, tuple):
+        return list(event.requested_value)
+    return [event.requested_value]

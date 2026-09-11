@@ -16,6 +16,9 @@ ProtocolAdapter -> ScenarioMapping -> ProcessBackend -> PhysicalProcessContext -
 - `ProcessRegisterMap` turns a scenario-mapped backend into Modbus-style
   register reads/writes. It is generic and should work for TE, water-treatment,
   power-grid, or building-automation backends if they expose the same contract.
+  Its write-preview path decodes protocol values into engineering values without
+  mutating the backend, which lets generated write acknowledgements depend on a
+  separately validated process-state patch.
 - `ProtocolAdapter` remains protocol-specific. Modbus, HTTP HMI, S7, OPC UA,
   DNP3, BACnet, or EtherNet/IP should all read/write through mappings rather
   than through simulator-specific column numbers.
@@ -83,6 +86,16 @@ loaded backend. At runtime the planner receives:
 For read requests, a planner can generate protocol replies from the current
 snapshot and scenario mapping. For state changes, patches are accepted only when
 they target writable backend variables and pass backend bounds.
+
+For Modbus write requests, the default process-aware path is:
+
+```text
+request write -> scenario decode -> world_patch proposal -> patch validator
+              -> backend override -> generated write ACK
+```
+
+If the decode or patch validation fails, the generated ACK is withheld and the
+protocol adapter can use its deterministic fallback.
 
 ## Runtime write semantics for traces
 

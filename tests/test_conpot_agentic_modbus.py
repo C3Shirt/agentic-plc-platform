@@ -7,8 +7,14 @@ from agentic_plc.adapters import (
     event_from_modbus_tcp_request,
     install_agentic_modbus_hook,
 )
-from agentic_plc.agent import AgentRuntime, RuleBasedDeceptionPlanner
+from agentic_plc.agent import (
+    AgentRuntime,
+    PhysicalProcessContext,
+    RuleBasedDeceptionPlanner,
+)
 from agentic_plc.contracts.events import Intent
+from agentic_plc.processes import ProcessRegisterMap, ProcessVariable, ScenarioMapping
+from agentic_plc.processes.trace import TraceProcessBackend
 from agentic_plc.telemetry import InMemoryEventLog
 from agentic_plc.world import TankPumpWorld
 
@@ -123,6 +129,29 @@ class AgenticModbusDatabankTests(unittest.TestCase):
         self.assertEqual(inner.calls, 1)
         self.assertEqual(event_log.list_events()[0].operation, "read_coils")
 
+    def test_agentic_databank_applies_mapped_write_before_generated_ack(self) -> None:
+        context = writable_process_context()
+        inner = FakeDatabank()
+        event_log = InMemoryEventLog()
+        runtime = AgentRuntime(
+            process_context=context,
+            planner=RuleBasedDeceptionPlanner(),
+            event_store=event_log,
+        )
+        databank = AgenticModbusDatabank(inner, runtime)
+
+        response, logdata = databank.handle_request(
+            query=None,
+            request=write_single_register_request(transaction_id=18, unit_id=1),
+            mode="tcp",
+        )
+
+        self.assertEqual(response.hex(), "0012000000060106000002bc")
+        self.assertEqual(logdata["agentic_generated"], True)
+        self.assertEqual(inner.calls, 0)
+        self.assertEqual(context.backend.read("level_sp"), 70.0)
+        self.assertEqual(len(runtime.latest_decision().world_patches), 1)
+
     def test_install_agentic_modbus_hook_wraps_server_databank(self) -> None:
         server = FakeServer()
         runtime = AgentRuntime(world=TankPumpWorld())
@@ -221,6 +250,52 @@ def _frame(transaction_id: int, unit_id: int, pdu: bytes) -> bytes:
     raw.append(unit_id)
     raw.extend(pdu)
     return bytes(raw)
+
+
+def writable_process_context() -> PhysicalProcessContext:
+    backend = TraceProcessBackend(
+        process_id="writable_process",
+        name="writable_trace",
+        time_seconds=[0.0],
+        variables=[
+            ProcessVariable(
+                variable_id="level_sp",
+                name="Level setpoint",
+                role="setpoint",
+                unit="%",
+                minimum=0.0,
+                maximum=100.0,
+                writable=True,
+            )
+        ],
+        series={"level_sp": (50.0,)},
+    )
+    scenario = ScenarioMapping.from_dict(
+        {
+            "scenario_id": "writable_modbus_slice",
+            "process_id": "writable_process",
+            "backend": {"type": "trace"},
+            "plc_area": "test_cell",
+            "description": "writable PLC slice for generated write acknowledgements",
+            "points": [
+                {
+                    "variable_id": "level_sp",
+                    "protocol": "modbus",
+                    "table": "holding_registers",
+                    "address": 0,
+                    "access": "read_write",
+                    "data_type": "uint16",
+                    "scale": 10.0,
+                }
+            ],
+        }
+    )
+    register_map = ProcessRegisterMap(backend, scenario)
+    return PhysicalProcessContext(
+        backend=backend,
+        scenario=scenario,
+        register_map=register_map,
+    )
 
 
 if __name__ == "__main__":

@@ -6,10 +6,11 @@ from typing import Iterable
 from agentic_plc.agent.process_context import PhysicalProcessContext
 from agentic_plc.agent.planner import DeceptionPlanner, RuleBasedDeceptionPlanner
 from agentic_plc.contracts.actions import AgentProposal, ProtocolReply, WorldPatch
-from agentic_plc.contracts.events import DeceptionPlan, ICSEvent
+from agentic_plc.contracts.events import DeceptionPlan, ICSEvent, Intent
 from agentic_plc.policy.plan_validator import DeceptionPlanValidator
 from agentic_plc.policy.protocol_reply_validator import ProtocolReplyValidator
 from agentic_plc.processes import ProcessPatchApplier
+from agentic_plc.protocols.modbus import ModbusFrameError, parse_modbus_tcp_frame
 from agentic_plc.world.model import TankPumpWorld
 from agentic_plc.world.patch import AppliedWorldPatch, WorldPatchApplier
 
@@ -68,6 +69,9 @@ class AgentController:
         protocol_replies: list[ProtocolReply] = []
         world_patches: list[AppliedWorldPatch] = []
         rejected: list[RejectedPlan] = []
+        validated_protocol_reply: ProtocolReply | None = None
+        reply_requires_patch = False
+        expected_write_patch: WorldPatch | None = None
 
         if proposal.deception_plan is not None:
             try:
@@ -98,10 +102,37 @@ class AgentController:
                     )
                 )
             else:
-                protocol_replies.append(proposal.protocol_reply)
+                validated_protocol_reply = proposal.protocol_reply
+                reply_requires_patch = _reply_requires_accepted_world_patch(
+                    validated_protocol_reply,
+                    event_list,
+                )
+                if reply_requires_patch and self._process_context is not None:
+                    expected_write_patch = _expected_process_write_patch(
+                        self._process_context,
+                        event_list,
+                    )
 
         if proposal.world_patch is not None:
-            if self._process_context is not None:
+            if (
+                reply_requires_patch
+                and self._process_context is not None
+                and not _patch_covers_expected(
+                    proposal.world_patch,
+                    expected_write_patch,
+                )
+            ):
+                rejected.append(
+                    RejectedPlan(
+                        plan=proposal.world_patch,
+                        error=(
+                            "world patch does not match the latest mapped "
+                            "protocol write"
+                        ),
+                        kind="world_patch",
+                    )
+                )
+            elif self._process_context is not None:
                 try:
                     world_patches.append(
                         self._process_patch_applier.apply(
@@ -145,6 +176,25 @@ class AgentController:
                         )
                     )
 
+        if validated_protocol_reply is not None:
+            if reply_requires_patch and not _accepted_patches_cover_expected(
+                world_patches,
+                expected_write_patch,
+                self._process_context,
+            ):
+                rejected.append(
+                    RejectedPlan(
+                        plan=validated_protocol_reply,
+                        error=(
+                            "protocol write reply withheld because no paired "
+                            "world patch was accepted"
+                        ),
+                        kind="protocol_reply",
+                    )
+                )
+            else:
+                protocol_replies.append(validated_protocol_reply)
+
         return AgentDecision(
             accepted=accepted,
             protocol_replies=protocol_replies,
@@ -175,3 +225,77 @@ def _call_planner(
             return planner.propose(events)  # type: ignore[call-arg]
         except TypeError:
             raise exc
+
+
+def _reply_requires_accepted_world_patch(
+    reply: ProtocolReply,
+    events: list[ICSEvent],
+) -> bool:
+    if not _latest_event_is_write(events):
+        return False
+    if bool(reply.metadata.get("requires_accepted_world_patch")):
+        return True
+    if reply.protocol.lower() not in {"modbus", "modbus_tcp"}:
+        return False
+    try:
+        frame = parse_modbus_tcp_frame(reply.payload_hex)
+    except ModbusFrameError:
+        return False
+    return not frame.is_exception and frame.function_code in {5, 6, 15, 16}
+
+
+def _latest_event_is_write(events: list[ICSEvent]) -> bool:
+    if not events:
+        return False
+    latest = events[-1]
+    return latest.intent in {Intent.WRITE_SETPOINT, Intent.CONTROL_OUTPUT}
+
+
+def _expected_process_write_patch(
+    context: PhysicalProcessContext,
+    events: list[ICSEvent],
+) -> WorldPatch | None:
+    if not events:
+        return None
+    try:
+        return context.world_patch_for_modbus_write_event(events[-1])
+    except ValueError:
+        return None
+
+
+def _accepted_patches_cover_expected(
+    applied_patches: list[AppliedWorldPatch],
+    expected_patch: WorldPatch | None,
+    context: PhysicalProcessContext | None,
+) -> bool:
+    if not applied_patches:
+        return False
+    if context is None:
+        return True
+    return any(
+        _patch_covers_expected(applied.patch, expected_patch)
+        for applied in applied_patches
+    )
+
+
+def _patch_covers_expected(
+    candidate: WorldPatch,
+    expected: WorldPatch | None,
+) -> bool:
+    if expected is None:
+        return False
+    return all(
+        any(
+            operation.path == expected_operation.path
+            and _same_patch_value(operation.value, expected_operation.value)
+            for operation in candidate.operations
+        )
+        for expected_operation in expected.operations
+    )
+
+
+def _same_patch_value(left: object, right: object) -> bool:
+    try:
+        return abs(float(left) - float(right)) <= 1e-9
+    except (TypeError, ValueError):
+        return left == right

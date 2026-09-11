@@ -151,6 +151,12 @@ and exception responses. `ProtocolReplyValidator` checks that generated response
 frames match the latest request's transaction id, unit id, function code, read
 byte count, and write echo fields before an adapter can send them.
 
+Current status: protocol writes against a scenario-mapped physical process can
+now be translated into a process-variable `world_patch` before a generated
+Modbus write acknowledgement is released. A successful write ACK is withheld
+unless the paired world patch is accepted, preserving read-back consistency and
+keeping deterministic Conpot fallback available for unmapped or rejected writes.
+
 ### P5 - Evaluation
 
 Compare original Conpot, deterministic world model, and agentic world model using
