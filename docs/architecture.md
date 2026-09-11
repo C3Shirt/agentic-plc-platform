@@ -184,3 +184,10 @@ events whose protocol transition was denied by the state machine.
 Compare original Conpot, deterministic world model, and agentic world model using
 protocol validity, cross-surface consistency, interaction depth, dwell time,
 meaningful state changes, lure progression, honeypot suspicion, and p95 latency.
+
+Current status: a first local consistency benchmark exists under
+`agentic_plc.evaluation`. It generates reproducible Modbus TCP interaction
+cases and scores protocol FSM status, generated reply behavior, world-patch
+application, and process read-back consistency. The benchmark is synthetic by
+design; public datasets such as SWaT, WaDi, HAI, BATADAL, CIC Modbus 2023, and
+ICS-Flow can later be imported into the same case/report schema.

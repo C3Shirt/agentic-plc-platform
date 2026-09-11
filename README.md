@@ -51,6 +51,10 @@ deterministic response path.
 - `ProtocolIntentTracker` keeps per-actor, per-protocol interaction state over
   normalized protocol events. This ports the stateful multi-turn design idea
   from MANTIS into ICS protocol traffic without adding an SSH service.
+- `ProtocolStateMachineRegistry` keeps per-session protocol legality separate
+  from attacker intent. The initial Modbus TCP profile checks transaction id,
+  unit id, function-code/operation consistency, request shape, and suspicious
+  transaction-id reuse before generated replies can be released.
 - `ProcessAwareResponsePolicy` wraps a base planner with protocol-phase-aware
   deception plans for address probing, register mapping, write attempts, and
   write-effect verification.
@@ -87,6 +91,8 @@ deterministic response path.
   before LLM calls. It keeps protocol-critical fields exact, ranks exposed
   process points by request relevance and actor interest, and leaves
   deterministic fallback plus proposal validators unchanged.
+- `agentic_plc.evaluation` provides the first synthetic consistency benchmark
+  for protocol-FSM, generated-reply, world-patch, and physical read-back checks.
 
 Default Conpot DataBus keys:
 
@@ -166,8 +172,17 @@ python tools\smoke_te_backend.py
 python tools\smoke_process_aware_agent.py
 python tools\smoke_context_compressor.py
 python tools\smoke_protocol_interaction.py
+python tools\smoke_protocol_state_machine.py
 python tools\smoke_modbus_responses.py
 python tools\smoke_process_write_through.py
+```
+
+Generate and run the local consistency benchmark:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\generate_consistency_benchmark.py
+python tools\generate_consistency_benchmark.py --output records\consistency_benchmark.json
 ```
 
 The agent smoke uses the no-LLM planner by default and writes sample events to
@@ -191,3 +206,5 @@ of editing `.env`.
 See `docs/architecture.md` for component boundaries and the implementation order.
 See `docs/process_backend_design.md` for the generic simulator-backend boundary.
 See `docs/process_context_compression.md` for the paper-backed PACC design.
+See `docs/benchmark_landscape.md` for the public benchmark survey and why the
+local consistency benchmark is needed.
