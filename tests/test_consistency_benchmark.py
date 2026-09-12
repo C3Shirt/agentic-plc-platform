@@ -5,6 +5,8 @@ import unittest
 
 from agentic_plc.evaluation import (
     ConsistencyBenchmarkRunner,
+    benchmark_cases_from_payload,
+    benchmark_cases_to_payload,
     build_default_modbus_consistency_cases,
     create_benchmark_process_context,
 )
@@ -43,6 +45,10 @@ class ConsistencyBenchmarkTests(unittest.TestCase):
         self.assertEqual(results[0].process_values["level_sp"], 70.0)
         self.assertEqual(results[0].world_patch_count, 1)
         self.assertEqual(results[1].reply_values, (700,))
+        self.assertTrue(results[0].process_invariant_results)
+        self.assertTrue(
+            all(result.passed for result in results[0].process_invariant_results)
+        )
 
     def test_protocol_denial_blocks_forced_generated_reply(self) -> None:
         case = next(
@@ -65,6 +71,25 @@ class ConsistencyBenchmarkTests(unittest.TestCase):
         encoded = json.dumps(report.to_dict(), sort_keys=True)
 
         self.assertIn("modbus_write_then_readback", encoded)
+
+    def test_default_cases_round_trip_with_process_invariants(self) -> None:
+        cases = build_default_modbus_consistency_cases()
+        loaded = benchmark_cases_from_payload(benchmark_cases_to_payload(cases))
+
+        report = ConsistencyBenchmarkRunner().run(loaded)
+
+        self.assertTrue(report.passed)
+        invariant_checks = [
+            check_name
+            for results in report.cases.values()
+            for result in results
+            for check_name in result.checks
+            if check_name.startswith("process_invariant:")
+        ]
+        self.assertIn(
+            "process_invariant:read_reply_matches_process_snapshot",
+            invariant_checks,
+        )
 
     def test_benchmark_process_context_starts_from_expected_state(self) -> None:
         context = create_benchmark_process_context()

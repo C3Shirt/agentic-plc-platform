@@ -70,6 +70,7 @@ licensed standards. The default cases cover:
 - write-then-read-back physical consistency;
 - protocol-valid but physically invalid writes;
 - generated-reply blocking when the protocol state machine denies the request.
+- declarative physical invariants over process snapshots and generated replies.
 
 The same schema can accept future benchmark adapters:
 
@@ -132,6 +133,7 @@ What this gives us now:
 - protocol-FSM expectations for allowed, anomalous, and denied transitions;
 - attack labels stored in `ICSEvent.metadata` for later per-attack analysis;
 - a reproducible JSON artifact that can be replayed by our benchmark runner.
+- compatibility with the same physical invariant DSL used by synthetic cases.
 
 What it intentionally does not claim:
 
@@ -139,3 +141,34 @@ What it intentionally does not claim:
 - no LLM-generated response quality score is assigned without a mapped process
   backend and expected read/write effects;
 - no raw PCAP parsing dependency is required inside the platform.
+
+## Physical invariant DSL
+
+The benchmark schema now supports optional per-step `process_invariants`. These
+rules are evaluated against the process snapshot before and after a benchmark
+step, plus the generated protocol reply when one exists. This moves the
+benchmark beyond fixed expected values while keeping every check explicit and
+auditable.
+
+Supported invariant kinds:
+
+- `variable_equals`: a process variable must equal a value within tolerance;
+- `variable_between`: a process variable must stay inside explicit or declared
+  backend bounds;
+- `relation`: one process variable must satisfy `lt`, `le`, `eq`, `ge`, or `gt`
+  relative to another variable or scalar value;
+- `trend`: a variable must increase, decrease, or stay stable between the
+  before/after snapshots of one step;
+- `moves_toward`: a measurement must move closer to a target variable;
+- `reply_matches_process_snapshot`: generated Modbus read values must equal the
+  current process snapshot encoded through the active register map.
+
+Example:
+
+```json
+{
+  "invariant_id": "read_reply_matches_process_snapshot",
+  "kind": "reply_matches_process_snapshot",
+  "description": "Generated Modbus read values must be encoded from the current physical-process snapshot."
+}
+```

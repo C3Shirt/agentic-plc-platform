@@ -23,6 +23,14 @@ from agentic_plc.evaluation.consistency_benchmark import (
     build_default_modbus_consistency_cases,
     create_benchmark_process_context,
 )
+from agentic_plc.evaluation.physical_invariants import (
+    InvariantComparison,
+    ProcessInvariant,
+    ProcessInvariantEvaluator,
+    ProcessInvariantKind,
+    ProcessInvariantResult,
+    TrendDirection,
+)
 
 __all__ = [
     "BenchmarkCase",
@@ -37,6 +45,12 @@ __all__ = [
     "CICAttackLogIndex",
     "CICModbusImportOptions",
     "ConsistencyBenchmarkRunner",
+    "InvariantComparison",
+    "ProcessInvariant",
+    "ProcessInvariantEvaluator",
+    "ProcessInvariantKind",
+    "ProcessInvariantResult",
+    "TrendDirection",
     "build_default_modbus_consistency_cases",
     "create_benchmark_process_context",
     "import_cic_modbus_benchmark",

@@ -6,6 +6,7 @@ from typing import Any, Iterable, Mapping
 
 from agentic_plc.agent.protocol_state_machine import ProtocolTransitionStatus
 from agentic_plc.evaluation.consistency_benchmark import BenchmarkCase, BenchmarkStep
+from agentic_plc.evaluation.physical_invariants import ProcessInvariant
 from agentic_plc.telemetry.serialization import event_from_dict
 
 
@@ -35,6 +36,12 @@ def benchmark_step_from_dict(data: Mapping[str, Any]) -> BenchmarkStep:
             data.get("expected_process_values", {})
         ),
         expected_reply_values=_optional_int_tuple(data.get("expected_reply_values")),
+        process_invariants=tuple(
+            ProcessInvariant.from_dict(invariant)
+            for invariant in data.get("process_invariants", ())
+            if isinstance(invariant, Mapping)
+        ),
+        tick_seconds_before=float(data.get("tick_seconds_before", 0.0)),
         forced_reply_hex=_optional_str(data.get("forced_reply_hex")),
         expected_forced_reply_accepted=_optional_bool(
             data.get("expected_forced_reply_accepted")

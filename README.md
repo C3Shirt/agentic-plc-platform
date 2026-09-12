@@ -93,6 +93,10 @@ deterministic response path.
   deterministic fallback plus proposal validators unchanged.
 - `agentic_plc.evaluation` provides the first synthetic consistency benchmark
   for protocol-FSM, generated-reply, world-patch, and physical read-back checks.
+  Benchmark steps can also carry declarative physical invariants such as
+  variable equality, declared bounds, cross-variable relations, trends,
+  movement toward a target, and generated Modbus reply values matching the
+  current process snapshot.
 
 Default Conpot DataBus keys:
 
@@ -185,6 +189,16 @@ python tools\generate_consistency_benchmark.py
 python tools\generate_consistency_benchmark.py --output records\consistency_benchmark.json
 python tools\generate_consistency_benchmark.py --cases-only --output records\consistency_cases.json
 python tools\run_consistency_benchmark.py --input records\consistency_cases.json --output records\consistency_report.json
+```
+
+Benchmark JSON supports optional per-step physical invariants:
+
+```json
+{
+  "invariant_id": "read_reply_matches_process_snapshot",
+  "kind": "reply_matches_process_snapshot",
+  "description": "Generated Modbus read values must match the active process snapshot."
+}
 ```
 
 Import CIC Modbus 2023 or tshark-exported Modbus CSV rows into the same

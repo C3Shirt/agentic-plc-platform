@@ -13,6 +13,13 @@ from agentic_plc.agent.process_context import PhysicalProcessContext
 from agentic_plc.agent.protocol_state_machine import ProtocolTransitionStatus
 from agentic_plc.contracts.actions import ProtocolReply
 from agentic_plc.contracts.events import ICSEvent, Intent
+from agentic_plc.evaluation.physical_invariants import (
+    ProcessInvariant,
+    ProcessInvariantEvaluator,
+    ProcessInvariantKind,
+    ProcessInvariantResult,
+    TrendDirection,
+)
 from agentic_plc.policy.protocol_reply_validator import ProtocolReplyValidator
 from agentic_plc.processes import (
     ProcessRegisterMap,
@@ -43,6 +50,8 @@ class BenchmarkStep:
     expected_world_patch_count: int | None = None
     expected_process_values: Mapping[str, float] = field(default_factory=dict)
     expected_reply_values: tuple[int, ...] | None = None
+    process_invariants: tuple[ProcessInvariant, ...] = ()
+    tick_seconds_before: float = 0.0
     forced_reply_hex: str | None = None
     expected_forced_reply_accepted: bool | None = None
     notes: str = ""
@@ -61,6 +70,10 @@ class BenchmarkStep:
                 if self.expected_reply_values is not None
                 else None
             ),
+            "process_invariants": [
+                invariant.to_dict() for invariant in self.process_invariants
+            ],
+            "tick_seconds_before": self.tick_seconds_before,
             "forced_reply_hex": self.forced_reply_hex,
             "expected_forced_reply_accepted": self.expected_forced_reply_accepted,
             "notes": self.notes,
@@ -99,6 +112,7 @@ class BenchmarkStepResult:
     world_patch_count: int
     rejected: tuple[dict[str, str], ...]
     process_values: Mapping[str, float]
+    process_invariant_results: tuple[ProcessInvariantResult, ...] = ()
     forced_reply_accepted: bool | None = None
     forced_reply_error: str | None = None
     checks: Mapping[str, bool] = field(default_factory=dict)
@@ -121,6 +135,9 @@ class BenchmarkStepResult:
             "world_patch_count": self.world_patch_count,
             "rejected": list(self.rejected),
             "process_values": dict(self.process_values),
+            "process_invariant_results": [
+                result.to_dict() for result in self.process_invariant_results
+            ],
             "forced_reply_accepted": self.forced_reply_accepted,
             "forced_reply_error": self.forced_reply_error,
             "checks": dict(self.checks),
@@ -176,10 +193,12 @@ class ConsistencyBenchmarkRunner:
         self,
         *,
         process_context_factory: ProcessContextFactory | None = None,
+        invariant_evaluator: ProcessInvariantEvaluator | None = None,
     ) -> None:
         self._process_context_factory = (
             process_context_factory or create_benchmark_process_context
         )
+        self._invariant_evaluator = invariant_evaluator or ProcessInvariantEvaluator()
 
     def run(
         self,
@@ -204,7 +223,11 @@ class ConsistencyBenchmarkRunner:
 
         results: list[BenchmarkStepResult] = []
         for step in case.steps:
+            if context is not None and step.tick_seconds_before > 0:
+                context.backend.tick(step.tick_seconds_before)
+            before_snapshot = context.snapshot() if context is not None else None
             decision = runtime.observe_and_decide(step.event)
+            after_snapshot = context.snapshot() if context is not None else None
             observed_event = event_log.list_events()[-1]
             protocol_status = str(
                 observed_event.metadata.get("protocol_fsm_status", "missing")
@@ -219,6 +242,14 @@ class ConsistencyBenchmarkRunner:
                 step,
                 observed_event,
             )
+            process_invariant_results = self._invariant_evaluator.evaluate_many(
+                step.process_invariants,
+                context=context,
+                before_snapshot=before_snapshot,
+                after_snapshot=after_snapshot,
+                event=observed_event,
+                reply_values=reply_values,
+            )
             checks = _checks_for_step(
                 step,
                 protocol_status=protocol_status,
@@ -227,6 +258,7 @@ class ConsistencyBenchmarkRunner:
                 process_values=process_values,
                 reply_values=reply_values,
                 forced_reply_accepted=forced_reply_accepted,
+                process_invariant_results=process_invariant_results,
             )
             results.append(
                 BenchmarkStepResult(
@@ -250,6 +282,7 @@ class ConsistencyBenchmarkRunner:
                         for item in decision.rejected
                     ),
                     process_values=process_values,
+                    process_invariant_results=process_invariant_results,
                     forced_reply_accepted=forced_reply_accepted,
                     forced_reply_error=forced_reply_error,
                     checks=checks,
@@ -341,6 +374,27 @@ def build_default_modbus_consistency_cases() -> tuple[BenchmarkCase, ...]:
                     expected_reply_generated=True,
                     expected_world_patch_count=1,
                     expected_process_values={"level_sp": 70.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="level_sp_matches_decoded_write",
+                            kind=ProcessInvariantKind.VARIABLE_EQUALS,
+                            variable_id="level_sp",
+                            value=70.0,
+                            description=(
+                                "The mapped setpoint must equal the engineering "
+                                "value decoded from the Modbus write."
+                            ),
+                        ),
+                        ProcessInvariant(
+                            invariant_id="level_sp_within_declared_bounds",
+                            kind=ProcessInvariantKind.VARIABLE_BETWEEN,
+                            variable_id="level_sp",
+                            description=(
+                                "The process backend should keep the setpoint "
+                                "inside its declared engineering range."
+                            ),
+                        ),
+                    ),
                 ),
                 _modbus_step_from_request(
                     step_id="read_back_level_setpoint",
@@ -354,6 +408,16 @@ def build_default_modbus_consistency_cases() -> tuple[BenchmarkCase, ...]:
                     expected_world_patch_count=0,
                     expected_process_values={"level_sp": 70.0},
                     expected_reply_values=(700,),
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="read_reply_matches_process_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Generated Modbus read values must be encoded "
+                                "from the current physical-process snapshot."
+                            ),
+                        ),
+                    ),
                 ),
             ),
         ),
@@ -377,6 +441,18 @@ def build_default_modbus_consistency_cases() -> tuple[BenchmarkCase, ...]:
                     expected_reply_generated=False,
                     expected_world_patch_count=0,
                     expected_process_values={"level_sp": 50.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="invalid_write_leaves_level_sp_stable",
+                            kind=ProcessInvariantKind.TREND,
+                            variable_id="level_sp",
+                            direction=TrendDirection.STABLE,
+                            description=(
+                                "A physically invalid write should not mutate "
+                                "the setpoint."
+                            ),
+                        ),
+                    ),
                 ),
             ),
         ),
@@ -521,6 +597,8 @@ def _modbus_step_from_request(
     expected_world_patch_count: int | None,
     expected_process_values: Mapping[str, float] | None = None,
     expected_reply_values: tuple[int, ...] | None = None,
+    process_invariants: tuple[ProcessInvariant, ...] = (),
+    tick_seconds_before: float = 0.0,
 ) -> BenchmarkStep:
     event = event_from_modbus_tcp_request(
         bytes.fromhex(request_hex),
@@ -542,6 +620,8 @@ def _modbus_step_from_request(
         expected_world_patch_count=expected_world_patch_count,
         expected_process_values=dict(expected_process_values or {}),
         expected_reply_values=expected_reply_values,
+        process_invariants=process_invariants,
+        tick_seconds_before=tick_seconds_before,
     )
 
 
@@ -653,6 +733,7 @@ def _checks_for_step(
     process_values: Mapping[str, float],
     reply_values: tuple[int, ...] | None,
     forced_reply_accepted: bool | None,
+    process_invariant_results: tuple[ProcessInvariantResult, ...],
 ) -> dict[str, bool]:
     checks = {
         "protocol_status": protocol_status == step.expected_protocol_status.value,
@@ -675,6 +756,8 @@ def _checks_for_step(
         checks["forced_reply_accepted"] = (
             forced_reply_accepted == step.expected_forced_reply_accepted
         )
+    for result in process_invariant_results:
+        checks[f"process_invariant:{result.invariant_id}"] = result.passed
     return checks
 
 
