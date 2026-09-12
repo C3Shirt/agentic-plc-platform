@@ -222,6 +222,26 @@ python tools\generate_consistency_benchmark.py --cases-only --output records\con
 python tools\run_consistency_benchmark.py --input records\consistency_cases.json --output records\consistency_report.json
 ```
 
+Run the same case schema against a live Modbus TCP endpoint:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\run_live_modbus_benchmark.py `
+  --host 127.0.0.1 `
+  --port 1502 `
+  --hmi-state-url http://127.0.0.1:8080/api/state `
+  --event-log records\honeypot_events.jsonl `
+  --output records\live_modbus_report.json
+```
+
+The live runner sends real Modbus TCP ADUs and checks response frame structure,
+transaction/unit/function-code consistency, optional reply values, optional HMI
+process-state values, optional physical invariants, and optional protocol-FSM
+status recorded in the JSONL event log. It deliberately does not infer
+`world_patch_count` or whether a reply was LLM-generated from the TCP stream,
+because those are internal runtime properties; use the offline runner or event
+telemetry for those checks.
+
 Benchmark JSON supports optional per-step physical invariants:
 
 ```json
