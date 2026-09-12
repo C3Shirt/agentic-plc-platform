@@ -52,7 +52,7 @@ class LLMConfig:
         environ: dict[str, str] | None = None,
     ) -> "LLMConfig":
         merged = dict(load_dotenv_values(env_file))
-        merged.update(environ or os.environ)
+        merged.update(os.environ if environ is None else environ)
 
         timeout = merged.get("LLM_TIMEOUT_SECONDS", "15")
         max_tokens = merged.get("LLM_MAX_TOKENS", "300")

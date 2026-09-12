@@ -1,0 +1,25 @@
+services:
+  agentic-plc-honeypot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      additional_contexts:
+        conpot-src: ../conpot-main/conpot-main
+    image: agentic-plc-honeypot:local
+    env_file:
+      - .env
+    command:
+      - python
+      - tools/run_agentic_honeypot.py
+      - --host
+      - 0.0.0.0
+      - --modbus-port
+      - "5020"
+      - --hmi-port
+      - "8080"
+    ports:
+      - "1502:5020"
+      - "8080:8080"
+    volumes:
+      - ./records:/opt/agentic-plc-platform/records
+    restart: unless-stopped

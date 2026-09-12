@@ -118,6 +118,37 @@ python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
+## Run with Docker
+
+The Docker setup packages this platform together with the sibling Conpot source
+tree. Run these commands from `agentic-plc-platform`:
+
+```powershell
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+The container exposes the honeypot HMI on host port `8080` and Modbus TCP on
+host port `1502` (`5020` inside the container). The service reads `.env` through
+Compose at runtime, so LLM credentials are not baked into the image. The default
+Compose command keeps the deterministic rule planner active; add
+`--live-llm` to the command when you want the online path to call the configured
+OpenAI-compatible endpoint.
+
+Host-side smoke checks:
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8080/api/state
+python -c "import socket; s=socket.create_connection(('127.0.0.1',1502),2); s.sendall(bytes.fromhex('000100000006010300000002')); print(s.recv(260).hex()); s.close()"
+```
+
+Stop the local deployment after the smoke test:
+
+```powershell
+docker compose down
+```
+
 Without installing development dependencies:
 
 ```powershell

@@ -34,6 +34,17 @@ class AgentConfigTests(unittest.TestCase):
             self.assertEqual(config.context_max_points, 7)
             self.assertEqual(config.context_max_events, 4)
 
+    def test_explicit_empty_environ_does_not_read_process_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("OpenAIBaseURL=https://example.test/v1\n", encoding="utf-8")
+
+            config = LLMConfig.from_env(env_file, environ={})
+
+            self.assertFalse(config.is_configured)
+            self.assertEqual(config.base_url, "https://example.test/v1")
+            self.assertIsNone(config.api_key)
+
     def test_load_dotenv_values_ignores_comments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
