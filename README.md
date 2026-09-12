@@ -242,6 +242,23 @@ status recorded in the JSONL event log. It deliberately does not infer
 because those are internal runtime properties; use the offline runner or event
 telemetry for those checks.
 
+When no `--input` file is provided, the built-in tank-pump live suite currently
+covers:
+
+- multi-table reads across coils, discrete inputs, input registers, and holding
+  registers;
+- function-6 single holding-register write followed by read-back;
+- function-5 single-coil control followed by read-back;
+- function-16 multiple-register and function-15 multiple-coil batch writes;
+- syntactically valid invalid-address probes that should return Modbus
+  exception code 2;
+- transaction-id reuse within one persistent TCP case, which can be checked
+  against the JSONL protocol-FSM telemetry.
+
+By default, all steps in one case reuse the same TCP connection so session-level
+protocol behavior can be tested. Use `--no-reuse-connection-per-case` when
+testing a server that closes the connection after each request.
+
 Benchmark JSON supports optional per-step physical invariants:
 
 ```json

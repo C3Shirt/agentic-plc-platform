@@ -50,6 +50,8 @@ class BenchmarkStep:
     expected_world_patch_count: int | None = None
     expected_process_values: Mapping[str, float] = field(default_factory=dict)
     expected_reply_values: tuple[int, ...] | None = None
+    expected_response_kind: str | None = None
+    expected_exception_code: int | None = None
     process_invariants: tuple[ProcessInvariant, ...] = ()
     tick_seconds_before: float = 0.0
     forced_reply_hex: str | None = None
@@ -70,6 +72,8 @@ class BenchmarkStep:
                 if self.expected_reply_values is not None
                 else None
             ),
+            "expected_response_kind": self.expected_response_kind,
+            "expected_exception_code": self.expected_exception_code,
             "process_invariants": [
                 invariant.to_dict() for invariant in self.process_invariants
             ],

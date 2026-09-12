@@ -14,7 +14,10 @@ from agentic_plc.evaluation import (
     BenchmarkCase,
     HMIStateObserver,
     LiveModbusBenchmarkRunner,
+    benchmark_cases_from_payload,
+    benchmark_cases_to_payload,
     build_default_modbus_consistency_cases,
+    build_default_live_modbus_cases,
     decode_modbus_response_values,
     send_modbus_tcp_request,
 )
@@ -27,6 +30,36 @@ from agentic_plc.protocols.modbus import (
 
 
 class LiveModbusBenchmarkTests(unittest.TestCase):
+    def test_default_live_cases_cover_expanded_modbus_behaviors(self) -> None:
+        cases = build_default_live_modbus_cases()
+
+        tags = {tag for case in cases for tag in case.tags}
+        steps = [step for case in cases for step in case.steps]
+
+        self.assertGreaterEqual(len(cases), 6)
+        self.assertGreaterEqual(len(steps), 18)
+        self.assertIn("multi_table", tags)
+        self.assertIn("multiple_write", tags)
+        self.assertIn("exception", tags)
+        self.assertIn("anomaly", tags)
+        self.assertIn("exception", {step.expected_response_kind for step in steps})
+
+    def test_default_live_cases_round_trip_extended_expectations(self) -> None:
+        loaded = benchmark_cases_from_payload(
+            benchmark_cases_to_payload(build_default_live_modbus_cases())
+        )
+
+        exception_step = next(
+            step
+            for case in loaded
+            if case.case_id == "live_modbus_exception_probing"
+            for step in case.steps
+            if step.step_id == "read_unmapped_holding_register"
+        )
+
+        self.assertEqual(exception_step.expected_response_kind, "exception")
+        self.assertEqual(exception_step.expected_exception_code, 2)
+
     def test_send_request_and_decode_live_modbus_response(self) -> None:
         state = _ProcessState()
         modbus_server = _start_modbus_server(state)
@@ -44,6 +77,35 @@ class LiveModbusBenchmarkTests(unittest.TestCase):
             self.assertEqual(decode_modbus_response_values(frame), (500,))
         finally:
             _stop_server(modbus_server)
+
+    def test_runner_passes_expanded_default_live_suite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            event_log = Path(directory) / "events.jsonl"
+            state = _ProcessState(event_log_path=event_log)
+            modbus_server = _start_modbus_server(state)
+            hmi_server = _start_hmi_server(state)
+            try:
+                report = LiveModbusBenchmarkRunner(
+                    host="127.0.0.1",
+                    port=modbus_server.server_address[1],
+                    hmi_observer=HMIStateObserver(
+                        f"http://127.0.0.1:{hmi_server.server_address[1]}/api/state"
+                    ),
+                    event_log_path=event_log,
+                ).run(build_default_live_modbus_cases())
+
+                self.assertTrue(report.passed)
+                self.assertEqual(report.total_steps, 18)
+                self.assertEqual(
+                    report.status_counts(),
+                    {"allowed": 17, "anomalous": 1},
+                )
+                exception_result = report.cases["live_modbus_exception_probing"][0]
+                self.assertTrue(exception_result.response_is_exception)
+                self.assertEqual(exception_result.exception_code, 2)
+            finally:
+                _stop_server(modbus_server)
+                _stop_server(hmi_server)
 
     def test_runner_checks_hmi_observed_write_then_readback(self) -> None:
         state = _ProcessState()
@@ -128,7 +190,14 @@ class LiveModbusBenchmarkTests(unittest.TestCase):
 class _ProcessState:
     def __init__(self, event_log_path: Path | None = None) -> None:
         self.level_setpoint_percent = 50.0
+        self.level_percent = 48.0
+        self.pressure_bar = 1.2
+        self.mode = "auto"
+        self.outlet_pump_running = False
+        self.inlet_valve_open = True
+        self.high_level_alarm = False
         self.event_log_path = event_log_path
+        self.transaction_signatures: dict[int, str] = {}
 
 
 class _ReusableTCPServer(socketserver.ThreadingTCPServer):
@@ -139,26 +208,18 @@ class _ModbusHandler(socketserver.BaseRequestHandler):
     server: "_ModbusServer"
 
     def handle(self) -> None:
-        header = _recv_exact(self.request, 7)
-        length = int.from_bytes(header[4:6], "big")
-        request = header + _recv_exact(self.request, length - 1)
-        parsed = parse_modbus_tcp_request(request)
-        self.server.state.append_event(request.hex())
+        while True:
+            try:
+                header = _recv_exact(self.request, 7)
+                length = int.from_bytes(header[4:6], "big")
+                request = header + _recv_exact(self.request, length - 1)
+                parsed = parse_modbus_tcp_request(request)
+            except ConnectionError:
+                return
 
-        if parsed.function_code == 3 and parsed.address == 0:
-            values = [int(round(self.server.state.level_setpoint_percent * 10))]
-            response_hex = build_modbus_tcp_response_from_request(parsed, values=values)
-        elif parsed.function_code == 6 and parsed.address == 0 and parsed.values:
-            self.server.state.level_setpoint_percent = parsed.values[0] / 10.0
-            response_hex = build_modbus_tcp_response_from_request(parsed)
-        else:
-            response_hex = build_modbus_tcp_exception_response(
-                transaction_id=parsed.transaction_id,
-                unit_id=parsed.unit_id,
-                function_code=parsed.function_code,
-                exception_code=2,
-            )
-        self.request.sendall(bytes.fromhex(response_hex))
+            self.server.state.append_event(request.hex())
+            response_hex = self.server.state.response_for(parsed)
+            self.request.sendall(bytes.fromhex(response_hex))
 
 
 class _ModbusServer(_ReusableTCPServer):
@@ -177,23 +238,120 @@ class _ServerState:
     def level_setpoint_percent(self, value: float) -> None:
         self.process_state.level_setpoint_percent = value
 
+    def response_for(self, parsed) -> str:
+        if parsed.function_code in {1, 2, 3, 4}:
+            values = self._read_values(parsed.function_code, parsed.address, parsed.count)
+            if values is None:
+                return build_modbus_tcp_response_from_request(parsed, exception_code=2)
+            return build_modbus_tcp_response_from_request(parsed, values=values)
+
+        if parsed.function_code == 5 and parsed.address is not None and parsed.values:
+            if parsed.address == 0:
+                self.process_state.outlet_pump_running = parsed.values[0] == 0xFF00
+                return build_modbus_tcp_response_from_request(parsed)
+            if parsed.address == 1:
+                self.process_state.inlet_valve_open = parsed.values[0] == 0xFF00
+                return build_modbus_tcp_response_from_request(parsed)
+            return build_modbus_tcp_response_from_request(parsed, exception_code=2)
+
+        if parsed.function_code == 6 and parsed.address is not None and parsed.values:
+            if parsed.address == 0:
+                self.process_state.level_setpoint_percent = parsed.values[0] / 10.0
+                return build_modbus_tcp_response_from_request(parsed)
+            if parsed.address == 1:
+                mode = {0: "stop", 1: "manual", 2: "auto", 3: "fault"}.get(
+                    parsed.values[0]
+                )
+                if mode is None:
+                    return build_modbus_tcp_response_from_request(parsed, exception_code=3)
+                self.process_state.mode = mode
+                return build_modbus_tcp_response_from_request(parsed)
+            return build_modbus_tcp_response_from_request(parsed, exception_code=2)
+
+        if parsed.function_code == 15 and parsed.address is not None:
+            if parsed.address == 0 and parsed.count == 2:
+                self.process_state.outlet_pump_running = bool(parsed.values[0])
+                self.process_state.inlet_valve_open = bool(parsed.values[1])
+                return build_modbus_tcp_response_from_request(parsed)
+            return build_modbus_tcp_response_from_request(parsed, exception_code=2)
+
+        if parsed.function_code == 16 and parsed.address is not None:
+            if parsed.address == 0 and parsed.count == 2:
+                self.process_state.level_setpoint_percent = parsed.values[0] / 10.0
+                mode = {0: "stop", 1: "manual", 2: "auto", 3: "fault"}.get(
+                    parsed.values[1]
+                )
+                if mode is None:
+                    return build_modbus_tcp_response_from_request(parsed, exception_code=3)
+                self.process_state.mode = mode
+                return build_modbus_tcp_response_from_request(parsed)
+            return build_modbus_tcp_response_from_request(parsed, exception_code=2)
+
+        return build_modbus_tcp_exception_response(
+            transaction_id=parsed.transaction_id,
+            unit_id=parsed.unit_id,
+            function_code=parsed.function_code,
+            exception_code=1,
+        )
+
+    def _read_values(
+        self,
+        function_code: int,
+        address: int | None,
+        count: int | None,
+    ) -> list[int] | None:
+        if address is None or count is None:
+            return None
+        blocks = {
+            1: [
+                int(self.process_state.outlet_pump_running),
+                int(self.process_state.inlet_valve_open),
+            ],
+            2: [int(self.process_state.high_level_alarm)],
+            3: [
+                int(round(self.process_state.level_setpoint_percent * 10)),
+                {"stop": 0, "manual": 1, "auto": 2, "fault": 3}[
+                    self.process_state.mode
+                ],
+            ],
+            4: [
+                int(round(self.process_state.level_percent * 10)),
+                int(round(self.process_state.pressure_bar * 100)),
+            ],
+        }
+        block = blocks[function_code]
+        if address < 0 or address + count > len(block):
+            return None
+        return block[address : address + count]
+
     def append_event(self, request_hex: str) -> None:
         if self.process_state.event_log_path is None:
             return
-        self.process_state.event_log_path.write_text(
-            json.dumps(
-                {
-                    "metadata": {
-                        "request_hex": request_hex,
-                        "protocol_fsm_status": "allowed",
-                        "protocol_fsm_reason": "test_allowed",
-                    }
-                },
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
+        parsed = parse_modbus_tcp_request(request_hex)
+        signature = request_hex[4:]
+        previous_signature = self.process_state.transaction_signatures.get(
+            parsed.transaction_id
         )
+        status = (
+            "anomalous"
+            if previous_signature is not None and previous_signature != signature
+            else "allowed"
+        )
+        self.process_state.transaction_signatures[parsed.transaction_id] = signature
+        with self.process_state.event_log_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {
+                        "metadata": {
+                            "request_hex": request_hex,
+                            "protocol_fsm_status": status,
+                            "protocol_fsm_reason": f"test_{status}",
+                        }
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
 
 
 class _HMIHandler(BaseHTTPRequestHandler):
@@ -208,12 +366,12 @@ class _HMIHandler(BaseHTTPRequestHandler):
             "scenario": "test_tank",
             "state": {
                 "level_setpoint_percent": self.server.state.level_setpoint_percent,
-                "level_percent": 48.0,
-                "pressure_bar": 1.2,
-                "mode": "auto",
-                "outlet_pump_running": True,
-                "inlet_valve_open": True,
-                "high_level_alarm": False,
+                "level_percent": self.server.state.level_percent,
+                "pressure_bar": self.server.state.pressure_bar,
+                "mode": self.server.state.mode,
+                "outlet_pump_running": self.server.state.outlet_pump_running,
+                "inlet_valve_open": self.server.state.inlet_valve_open,
+                "high_level_alarm": self.server.state.high_level_alarm,
             },
         }
         body = json.dumps(payload).encode("utf-8")

@@ -36,6 +36,8 @@ def benchmark_step_from_dict(data: Mapping[str, Any]) -> BenchmarkStep:
             data.get("expected_process_values", {})
         ),
         expected_reply_values=_optional_int_tuple(data.get("expected_reply_values")),
+        expected_response_kind=_optional_str(data.get("expected_response_kind")),
+        expected_exception_code=_optional_int(data.get("expected_exception_code")),
         process_invariants=tuple(
             ProcessInvariant.from_dict(invariant)
             for invariant in data.get("process_invariants", ())

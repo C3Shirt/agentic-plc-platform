@@ -9,12 +9,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from agentic_plc.adapters import ModbusHookContext, event_from_modbus_tcp_request
 from agentic_plc.contracts.actions import ProtocolReply
 from agentic_plc.contracts.events import ICSEvent
+from agentic_plc.agent.protocol_state_machine import ProtocolTransitionStatus
 from agentic_plc.evaluation.consistency_benchmark import (
     BenchmarkCase,
     BenchmarkStep,
-    build_default_modbus_consistency_cases,
 )
 from agentic_plc.evaluation.physical_invariants import (
     InvariantComparison,
@@ -88,6 +89,408 @@ DEFAULT_HMI_REGISTER_BINDINGS: tuple[HMIRegisterBinding, ...] = (
     HMIRegisterBinding(4, 0, "level_percent", scale=10.0),
     HMIRegisterBinding(4, 1, "pressure_bar", scale=100.0),
 )
+
+
+def build_default_live_modbus_cases() -> tuple[BenchmarkCase, ...]:
+    """Build live black-box Modbus cases for the tank-pump honeypot surface.
+
+    These cases reuse the public benchmark schema but focus on what can be
+    observed through a real Modbus TCP socket plus an optional HMI/event-log
+    side channel. Stable process points use exact read-back checks; dynamic
+    measurements use bounds to avoid false failures from normal simulation
+    ticks between a Modbus response and the HMI snapshot.
+    """
+
+    return (
+        BenchmarkCase(
+            case_id="live_modbus_table_scan",
+            description=(
+                "Scan every exposed Modbus table and, when an HMI observer is "
+                "available, compare stable table values with the live process "
+                "snapshot."
+            ),
+            requires_process_context=False,
+            tags=("live", "modbus", "scan", "multi_table", "physical_observer"),
+            steps=(
+                _live_modbus_step_from_request(
+                    step_id="read_coils_0_2",
+                    request_hex=_modbus_read_request(
+                        transaction_id=600,
+                        function_code=1,
+                        address=0,
+                        count=2,
+                    ),
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="coil_values_match_hmi_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Coil read-back should match HMI actuator state."
+                            ),
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_discrete_inputs_0_1",
+                    request_hex=_modbus_read_request(
+                        transaction_id=601,
+                        function_code=2,
+                        address=0,
+                        count=1,
+                    ),
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="discrete_input_matches_hmi_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Discrete-input alarm state should match HMI state."
+                            ),
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_input_registers_0_2",
+                    request_hex=_modbus_read_request(
+                        transaction_id=602,
+                        function_code=4,
+                        address=0,
+                        count=2,
+                    ),
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="level_measurement_within_bounds",
+                            kind=ProcessInvariantKind.VARIABLE_BETWEEN,
+                            variable_id="level_pct",
+                            description="Live level measurement should stay bounded.",
+                        ),
+                        ProcessInvariant(
+                            invariant_id="pressure_measurement_nonnegative",
+                            kind=ProcessInvariantKind.VARIABLE_BETWEEN,
+                            variable_id="pressure_bar",
+                            description="Live pressure should stay non-negative.",
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_holding_registers_0_2",
+                    request_hex=_modbus_read_request(
+                        transaction_id=603,
+                        function_code=3,
+                        address=0,
+                        count=2,
+                    ),
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="holding_registers_match_hmi_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Stable setpoint/mode registers should match HMI."
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        BenchmarkCase(
+            case_id="live_modbus_single_register_write_readback",
+            description=(
+                "Write a level setpoint through function 6 and verify that both "
+                "HMI state and a subsequent holding-register read reflect it."
+            ),
+            requires_process_context=False,
+            tags=("live", "modbus", "write_readback", "holding_registers"),
+            steps=(
+                _live_modbus_step_from_request(
+                    step_id="write_level_setpoint_70_percent",
+                    request_hex=_modbus_write_single_register_request(
+                        transaction_id=610,
+                        address=0,
+                        value=700,
+                    ),
+                    expected_process_values={"level_sp": 70.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="hmi_level_sp_is_70_after_single_write",
+                            kind=ProcessInvariantKind.VARIABLE_EQUALS,
+                            variable_id="level_sp",
+                            value=70.0,
+                            description=(
+                                "The HMI-observed setpoint should decode to 70%."
+                            ),
+                        ),
+                        ProcessInvariant(
+                            invariant_id="hmi_level_sp_stays_in_bounds",
+                            kind=ProcessInvariantKind.VARIABLE_BETWEEN,
+                            variable_id="level_sp",
+                            description="The setpoint should remain in process bounds.",
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_level_setpoint_after_single_write",
+                    request_hex=_modbus_read_request(
+                        transaction_id=611,
+                        function_code=3,
+                        address=0,
+                        count=1,
+                    ),
+                    expected_reply_values=(700,),
+                    expected_process_values={"level_sp": 70.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="single_write_readback_matches_hmi_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Setpoint read-back should match the HMI snapshot."
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        BenchmarkCase(
+            case_id="live_modbus_coil_control_readback",
+            description=(
+                "Toggle the outlet-pump coil and verify coil read-back plus HMI "
+                "actuator state."
+            ),
+            requires_process_context=False,
+            tags=("live", "modbus", "write_readback", "coils", "actuator"),
+            steps=(
+                _live_modbus_step_from_request(
+                    step_id="force_outlet_pump_on",
+                    request_hex=_modbus_write_single_coil_request(
+                        transaction_id=620,
+                        address=0,
+                        energized=True,
+                    ),
+                    expected_process_values={"pump_cmd": 1.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="hmi_pump_on_after_coil_write",
+                            kind=ProcessInvariantKind.VARIABLE_EQUALS,
+                            variable_id="pump_cmd",
+                            value=1.0,
+                            description="Coil write should turn the pump on.",
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_outlet_pump_coil_on",
+                    request_hex=_modbus_read_request(
+                        transaction_id=621,
+                        function_code=1,
+                        address=0,
+                        count=1,
+                    ),
+                    expected_reply_values=(1,),
+                    expected_process_values={"pump_cmd": 1.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="pump_on_readback_matches_hmi_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Pump coil read-back should match the HMI state."
+                            ),
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="force_outlet_pump_off",
+                    request_hex=_modbus_write_single_coil_request(
+                        transaction_id=622,
+                        address=0,
+                        energized=False,
+                    ),
+                    expected_process_values={"pump_cmd": 0.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="hmi_pump_off_after_coil_write",
+                            kind=ProcessInvariantKind.VARIABLE_EQUALS,
+                            variable_id="pump_cmd",
+                            value=0.0,
+                            description="Coil write should turn the pump off.",
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_outlet_pump_coil_off",
+                    request_hex=_modbus_read_request(
+                        transaction_id=623,
+                        function_code=1,
+                        address=0,
+                        count=1,
+                    ),
+                    expected_reply_values=(0,),
+                    expected_process_values={"pump_cmd": 0.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="pump_off_readback_matches_hmi_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Pump-off coil read-back should match the HMI state."
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        BenchmarkCase(
+            case_id="live_modbus_multiple_write_readback",
+            description=(
+                "Use function 16 and 15 batch writes, then verify register/coil "
+                "read-back through the live protocol endpoint."
+            ),
+            requires_process_context=False,
+            tags=("live", "modbus", "multiple_write", "write_readback"),
+            steps=(
+                _live_modbus_step_from_request(
+                    step_id="write_setpoint_and_mode_batch",
+                    request_hex=_modbus_write_multiple_registers_request(
+                        transaction_id=630,
+                        address=0,
+                        values=(650, 2),
+                    ),
+                    expected_process_values={"level_sp": 65.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="hmi_level_sp_is_65_after_batch_write",
+                            kind=ProcessInvariantKind.VARIABLE_EQUALS,
+                            variable_id="level_sp",
+                            value=65.0,
+                            description=(
+                                "Batch register write should set the level setpoint."
+                            ),
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_setpoint_and_mode_after_batch",
+                    request_hex=_modbus_read_request(
+                        transaction_id=631,
+                        function_code=3,
+                        address=0,
+                        count=2,
+                    ),
+                    expected_reply_values=(650, 2),
+                    expected_process_values={"level_sp": 65.0},
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="batch_register_readback_matches_hmi_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Batch-written registers should match HMI state."
+                            ),
+                        ),
+                    ),
+                ),
+                _live_modbus_step_from_request(
+                    step_id="write_pump_and_inlet_coils_batch",
+                    request_hex=_modbus_write_multiple_coils_request(
+                        transaction_id=632,
+                        address=0,
+                        values=(1, 1),
+                    ),
+                    expected_process_values={
+                        "pump_cmd": 1.0,
+                        "inlet_valve_open": 1.0,
+                    },
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_pump_and_inlet_coils_after_batch",
+                    request_hex=_modbus_read_request(
+                        transaction_id=633,
+                        function_code=1,
+                        address=0,
+                        count=2,
+                    ),
+                    expected_reply_values=(1, 1),
+                    expected_process_values={
+                        "pump_cmd": 1.0,
+                        "inlet_valve_open": 1.0,
+                    },
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="batch_coil_readback_matches_hmi_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "Batch-written coils should match HMI state."
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        BenchmarkCase(
+            case_id="live_modbus_exception_probing",
+            description=(
+                "Probe unmapped but syntactically valid Modbus addresses and "
+                "require normal Modbus exception responses rather than malformed "
+                "frames or silent state corruption."
+            ),
+            requires_process_context=False,
+            tags=("live", "modbus", "exception", "invalid_address", "probing"),
+            steps=(
+                _live_modbus_step_from_request(
+                    step_id="read_unmapped_holding_register",
+                    request_hex=_modbus_read_request(
+                        transaction_id=640,
+                        function_code=3,
+                        address=99,
+                        count=1,
+                    ),
+                    expected_response_kind="exception",
+                    expected_exception_code=2,
+                    notes="Exception code 2 is Illegal Data Address.",
+                ),
+                _live_modbus_step_from_request(
+                    step_id="read_unmapped_coil",
+                    request_hex=_modbus_read_request(
+                        transaction_id=641,
+                        function_code=1,
+                        address=99,
+                        count=1,
+                    ),
+                    expected_response_kind="exception",
+                    expected_exception_code=2,
+                    notes="Exception code 2 is Illegal Data Address.",
+                ),
+            ),
+        ),
+        BenchmarkCase(
+            case_id="live_modbus_transaction_reuse_sequence",
+            description=(
+                "Reuse a transaction id for a different request within one live "
+                "case. The TCP response may still be well formed, but event-log "
+                "telemetry should mark the second request anomalous when session "
+                "correlation is enabled."
+            ),
+            requires_process_context=False,
+            tags=("live", "modbus", "protocol_fsm", "transaction_id", "anomaly"),
+            steps=(
+                _live_modbus_step_from_request(
+                    step_id="transaction_reuse_baseline_read",
+                    request_hex=_modbus_read_request(
+                        transaction_id=650,
+                        function_code=3,
+                        address=0,
+                        count=1,
+                    ),
+                    expected_protocol_status=ProtocolTransitionStatus.ALLOWED,
+                ),
+                _live_modbus_step_from_request(
+                    step_id="transaction_reuse_different_address",
+                    request_hex=_modbus_read_request(
+                        transaction_id=650,
+                        function_code=3,
+                        address=1,
+                        count=1,
+                    ),
+                    expected_protocol_status=ProtocolTransitionStatus.ANOMALOUS,
+                ),
+            ),
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +588,9 @@ class LiveBenchmarkStepResult:
     response_hex: str | None = None
     response_error: str | None = None
     latency_ms: float | None = None
+    response_function_code: int | None = None
+    response_is_exception: bool | None = None
+    exception_code: int | None = None
     response_valid: bool = False
     response_validation_error: str | None = None
     protocol_status: str | None = None
@@ -207,6 +613,9 @@ class LiveBenchmarkStepResult:
             "response_hex": self.response_hex,
             "response_error": self.response_error,
             "latency_ms": self.latency_ms,
+            "response_function_code": self.response_function_code,
+            "response_is_exception": self.response_is_exception,
+            "exception_code": self.exception_code,
             "response_valid": self.response_valid,
             "response_validation_error": self.response_validation_error,
             "protocol_status": self.protocol_status,
@@ -296,6 +705,7 @@ class LiveModbusBenchmarkRunner:
         hmi_observer: HMIStateObserver | None = None,
         event_log_path: Path | str | None = None,
         event_log_timeout_seconds: float = 1.0,
+        reuse_connection_per_case: bool = True,
     ) -> None:
         self._host = host
         self._port = int(port)
@@ -303,25 +713,43 @@ class LiveModbusBenchmarkRunner:
         self._hmi_observer = hmi_observer
         self._event_log_path = Path(event_log_path) if event_log_path else None
         self._event_log_timeout_seconds = float(event_log_timeout_seconds)
+        self._reuse_connection_per_case = reuse_connection_per_case
 
     def run(
         self,
         cases: tuple[BenchmarkCase, ...] | None = None,
     ) -> LiveBenchmarkReport:
-        cases = cases or build_default_modbus_consistency_cases()
+        cases = cases or build_default_live_modbus_cases()
         return LiveBenchmarkReport(
             cases={case.case_id: self.run_case(case) for case in cases}
         )
 
     def run_case(self, case: BenchmarkCase) -> tuple[LiveBenchmarkStepResult, ...]:
         results: list[LiveBenchmarkStepResult] = []
+        if self._reuse_connection_per_case:
+            with ModbusTcpClient(
+                self._host,
+                self._port,
+                timeout_seconds=self._timeout_seconds,
+            ) as client:
+                for step in case.steps:
+                    if step.tick_seconds_before > 0:
+                        time.sleep(step.tick_seconds_before)
+                    results.append(self.run_step(step, client=client))
+            return tuple(results)
+
         for step in case.steps:
             if step.tick_seconds_before > 0:
                 time.sleep(step.tick_seconds_before)
-            results.append(self.run_step(step))
+            results.append(self.run_step(step, client=None))
         return tuple(results)
 
-    def run_step(self, step: BenchmarkStep) -> LiveBenchmarkStepResult:
+    def run_step(
+        self,
+        step: BenchmarkStep,
+        *,
+        client: "ModbusTcpClient | None" = None,
+    ) -> LiveBenchmarkStepResult:
         before_state = _safe_hmi_snapshot(self._hmi_observer)
         response_hex: str | None = None
         response_error: str | None = None
@@ -329,18 +757,24 @@ class LiveModbusBenchmarkRunner:
         response_validation_error: str | None = None
         reply_values: tuple[int, ...] | None = None
         latency_ms: float | None = None
+        response_function_code: int | None = None
+        response_is_exception: bool | None = None
+        exception_code: int | None = None
 
         if step.request_hex is None:
             response_error = "benchmark step has no request_hex"
         else:
             started = time.perf_counter()
             try:
-                response_hex = send_modbus_tcp_request(
-                    self._host,
-                    self._port,
-                    step.request_hex,
-                    timeout_seconds=self._timeout_seconds,
-                )
+                if client is not None:
+                    response_hex = client.request(step.request_hex)
+                else:
+                    response_hex = send_modbus_tcp_request(
+                        self._host,
+                        self._port,
+                        step.request_hex,
+                        timeout_seconds=self._timeout_seconds,
+                    )
                 latency_ms = (time.perf_counter() - started) * 1000
             except Exception as exc:
                 response_error = str(exc)
@@ -350,6 +784,13 @@ class LiveModbusBenchmarkRunner:
             try:
                 frame = parse_modbus_tcp_frame(response_hex)
                 response_valid = True
+                response_function_code = (
+                    frame.function_code & 0x7F
+                    if frame.is_exception
+                    else frame.function_code
+                )
+                response_is_exception = frame.is_exception
+                exception_code = frame.data[0] if frame.is_exception else None
                 reply_values = decode_modbus_response_values(
                     frame,
                     count=step.event.count,
@@ -393,6 +834,8 @@ class LiveModbusBenchmarkRunner:
             response_error=response_error,
             response_valid=response_valid,
             response_validation_error=response_validation_error,
+            response_is_exception=response_is_exception,
+            exception_code=exception_code,
             protocol_status=protocol_status,
             event_log_path=self._event_log_path,
             hmi_observer_configured=self._hmi_observer is not None,
@@ -406,6 +849,9 @@ class LiveModbusBenchmarkRunner:
             response_hex=response_hex,
             response_error=response_error,
             latency_ms=latency_ms,
+            response_function_code=response_function_code,
+            response_is_exception=response_is_exception,
+            exception_code=exception_code,
             response_valid=response_valid,
             response_validation_error=response_validation_error,
             protocol_status=protocol_status,
@@ -432,6 +878,58 @@ class LiveModbusBenchmarkRunner:
             time.sleep(0.05)
 
 
+class ModbusTcpClient:
+    """Small persistent Modbus TCP client for stateful live benchmark cases."""
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        timeout_seconds: float = 2.0,
+    ) -> None:
+        self._host = host
+        self._port = int(port)
+        self._timeout_seconds = float(timeout_seconds)
+        self._sock: socket.socket | None = None
+
+    def __enter__(self) -> "ModbusTcpClient":
+        self.connect()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def connect(self) -> None:
+        self.close()
+        self._sock = socket.create_connection(
+            (self._host, self._port),
+            timeout=self._timeout_seconds,
+        )
+        self._sock.settimeout(self._timeout_seconds)
+
+    def request(self, request_hex: str) -> str:
+        if self._sock is None:
+            self.connect()
+        assert self._sock is not None
+        request = bytes.fromhex(_clean_hex(request_hex))
+        self._sock.sendall(request)
+        header = _recv_exact(self._sock, 7)
+        length = int.from_bytes(header[4:6], "big")
+        if length <= 0:
+            raise ModbusFrameError("Modbus TCP response length must be positive")
+        body = _recv_exact(self._sock, length - 1)
+        return (header + body).hex()
+
+    def close(self) -> None:
+        if self._sock is None:
+            return
+        try:
+            self._sock.close()
+        finally:
+            self._sock = None
+
+
 def send_modbus_tcp_request(
     host: str,
     port: int,
@@ -441,16 +939,12 @@ def send_modbus_tcp_request(
 ) -> str:
     """Send one Modbus TCP ADU and return exactly one response ADU as hex."""
 
-    request = bytes.fromhex(_clean_hex(request_hex))
-    with socket.create_connection((host, int(port)), timeout=timeout_seconds) as sock:
-        sock.settimeout(timeout_seconds)
-        sock.sendall(request)
-        header = _recv_exact(sock, 7)
-        length = int.from_bytes(header[4:6], "big")
-        if length <= 0:
-            raise ModbusFrameError("Modbus TCP response length must be positive")
-        body = _recv_exact(sock, length - 1)
-    return (header + body).hex()
+    with ModbusTcpClient(
+        host,
+        port,
+        timeout_seconds=timeout_seconds,
+    ) as client:
+        return client.request(request_hex)
 
 
 def decode_modbus_response_values(
@@ -499,6 +993,8 @@ def _checks_for_live_step(
     response_error: str | None,
     response_valid: bool,
     response_validation_error: str | None,
+    response_is_exception: bool | None,
+    exception_code: int | None,
     protocol_status: str | None,
     event_log_path: Path | None,
     hmi_observer_configured: bool,
@@ -518,6 +1014,28 @@ def _checks_for_live_step(
         checks["denied_response_not_malformed"] = (
             response_valid or response_validation_error is None
         )
+
+    if step.expected_response_kind is not None:
+        expected_kind = step.expected_response_kind.strip().lower()
+        if expected_kind == "normal":
+            checks["response_kind"] = (
+                response_hex is not None
+                and response_valid
+                and response_is_exception is False
+            )
+        elif expected_kind == "exception":
+            checks["response_kind"] = (
+                response_hex is not None
+                and response_valid
+                and response_is_exception is True
+            )
+        elif expected_kind == "none":
+            checks["response_kind"] = response_hex is None
+        else:
+            checks["response_kind"] = False
+
+    if step.expected_exception_code is not None:
+        checks["exception_code"] = exception_code == step.expected_exception_code
 
     if event_log_path is not None:
         checks["protocol_status_observed"] = protocol_status is not None
@@ -812,6 +1330,167 @@ def _event_function_code(event: ICSEvent) -> int:
         "write_multiple_coils": 15,
         "write_multiple_registers": 16,
     }.get(event.operation, 0)
+
+
+def _live_modbus_step_from_request(
+    *,
+    step_id: str,
+    request_hex: str,
+    expected_protocol_status: ProtocolTransitionStatus = (
+        ProtocolTransitionStatus.ALLOWED
+    ),
+    expected_response_kind: str = "normal",
+    expected_exception_code: int | None = None,
+    expected_process_values: Mapping[str, float] | None = None,
+    expected_reply_values: tuple[int, ...] | None = None,
+    process_invariants: tuple[ProcessInvariant, ...] = (),
+    tick_seconds_before: float = 0.0,
+    notes: str = "",
+) -> BenchmarkStep:
+    event = event_from_modbus_tcp_request(
+        bytes.fromhex(request_hex),
+        context=ModbusHookContext(
+            session_id="live-modbus-benchmark",
+            source_ip="192.0.2.10",
+            actor_id="live-benchmark-actor",
+            source_port=55020,
+            destination_ip="192.0.2.20",
+            destination_port=502,
+        ),
+    )
+    return BenchmarkStep(
+        step_id=step_id,
+        request_hex=request_hex,
+        event=event,
+        expected_protocol_status=expected_protocol_status,
+        expected_reply_generated=None,
+        expected_world_patch_count=None,
+        expected_process_values=dict(expected_process_values or {}),
+        expected_reply_values=expected_reply_values,
+        expected_response_kind=expected_response_kind,
+        expected_exception_code=expected_exception_code,
+        process_invariants=process_invariants,
+        tick_seconds_before=tick_seconds_before,
+        notes=notes,
+    )
+
+
+def _modbus_read_request(
+    *,
+    transaction_id: int,
+    function_code: int,
+    address: int,
+    count: int,
+    unit_id: int = 1,
+) -> str:
+    return _modbus_request_frame_hex(
+        transaction_id=transaction_id,
+        function_code=function_code,
+        data=address.to_bytes(2, "big") + count.to_bytes(2, "big"),
+        unit_id=unit_id,
+    )
+
+
+def _modbus_write_single_coil_request(
+    *,
+    transaction_id: int,
+    address: int,
+    energized: bool,
+    unit_id: int = 1,
+) -> str:
+    value = 0xFF00 if energized else 0x0000
+    return _modbus_request_frame_hex(
+        transaction_id=transaction_id,
+        function_code=5,
+        data=address.to_bytes(2, "big") + value.to_bytes(2, "big"),
+        unit_id=unit_id,
+    )
+
+
+def _modbus_write_single_register_request(
+    *,
+    transaction_id: int,
+    address: int,
+    value: int,
+    unit_id: int = 1,
+) -> str:
+    return _modbus_request_frame_hex(
+        transaction_id=transaction_id,
+        function_code=6,
+        data=address.to_bytes(2, "big") + int(value).to_bytes(2, "big"),
+        unit_id=unit_id,
+    )
+
+
+def _modbus_write_multiple_registers_request(
+    *,
+    transaction_id: int,
+    address: int,
+    values: Iterable[int],
+    unit_id: int = 1,
+) -> str:
+    encoded_values = bytearray()
+    count = 0
+    for value in values:
+        encoded_values.extend(int(value).to_bytes(2, "big"))
+        count += 1
+    return _modbus_request_frame_hex(
+        transaction_id=transaction_id,
+        function_code=16,
+        data=(
+            address.to_bytes(2, "big")
+            + count.to_bytes(2, "big")
+            + bytes([len(encoded_values)])
+            + bytes(encoded_values)
+        ),
+        unit_id=unit_id,
+    )
+
+
+def _modbus_write_multiple_coils_request(
+    *,
+    transaction_id: int,
+    address: int,
+    values: Iterable[int | bool],
+    unit_id: int = 1,
+) -> str:
+    bits = [int(bool(value)) for value in values]
+    packed = bytearray()
+    for offset in range(0, len(bits), 8):
+        byte_value = 0
+        for bit, value in enumerate(bits[offset : offset + 8]):
+            if value:
+                byte_value |= 1 << bit
+        packed.append(byte_value)
+    return _modbus_request_frame_hex(
+        transaction_id=transaction_id,
+        function_code=15,
+        data=(
+            address.to_bytes(2, "big")
+            + len(bits).to_bytes(2, "big")
+            + bytes([len(packed)])
+            + bytes(packed)
+        ),
+        unit_id=unit_id,
+    )
+
+
+def _modbus_request_frame_hex(
+    *,
+    transaction_id: int,
+    function_code: int,
+    data: bytes,
+    unit_id: int = 1,
+) -> str:
+    pdu = bytes([function_code]) + data
+    length = 1 + len(pdu)
+    raw = bytearray()
+    raw.extend(int(transaction_id).to_bytes(2, "big"))
+    raw.extend((0).to_bytes(2, "big"))
+    raw.extend(length.to_bytes(2, "big"))
+    raw.append(int(unit_id))
+    raw.extend(pdu)
+    return bytes(raw).hex()
 
 
 def _failed(

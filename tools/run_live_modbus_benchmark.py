@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agentic_plc.evaluation import (
     HMIStateObserver,
     LiveModbusBenchmarkRunner,
-    build_default_modbus_consistency_cases,
+    build_default_live_modbus_cases,
     load_benchmark_cases,
     write_benchmark_payload,
 )
@@ -33,7 +33,7 @@ def main() -> int:
         type=Path,
         help=(
             "Benchmark JSON containing a top-level cases list. If omitted, "
-            "the built-in Modbus consistency cases are used."
+            "the built-in live Modbus suite is used."
         ),
     )
     parser.add_argument(
@@ -65,6 +65,15 @@ def main() -> int:
         help="Seconds to wait for a matching request event in --event-log.",
     )
     parser.add_argument(
+        "--no-reuse-connection-per-case",
+        action="store_true",
+        help=(
+            "Open a fresh TCP connection for every step. By default, steps in "
+            "one case reuse a connection so session-level protocol behavior can "
+            "be evaluated."
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Optional JSON output path for cases plus live_report.",
@@ -79,7 +88,7 @@ def main() -> int:
     cases = (
         load_benchmark_cases(args.input)
         if args.input is not None
-        else build_default_modbus_consistency_cases()
+        else build_default_live_modbus_cases()
     )
     if args.case_id:
         wanted = set(args.case_id)
@@ -97,6 +106,7 @@ def main() -> int:
         hmi_observer=observer,
         event_log_path=args.event_log,
         event_log_timeout_seconds=args.event_log_timeout,
+        reuse_connection_per_case=not args.no_reuse_connection_per_case,
     ).run(cases)
     payload = {
         "cases": [case.to_dict() for case in cases],
