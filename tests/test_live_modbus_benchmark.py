@@ -14,8 +14,11 @@ from agentic_plc.evaluation import (
     BenchmarkCase,
     HMIStateObserver,
     LiveModbusBenchmarkRunner,
+    ModbusAttackGenerationOptions,
+    ModbusTableSpec,
     benchmark_cases_from_payload,
     benchmark_cases_to_payload,
+    build_generated_modbus_attack_cases,
     build_default_modbus_consistency_cases,
     build_default_live_modbus_cases,
     decode_modbus_response_values,
@@ -60,6 +63,86 @@ class LiveModbusBenchmarkTests(unittest.TestCase):
         self.assertEqual(exception_step.expected_response_kind, "exception")
         self.assertEqual(exception_step.expected_exception_code, 2)
 
+    def test_generated_attack_cases_round_trip_and_are_deterministic(self) -> None:
+        options = ModbusAttackGenerationOptions(
+            seed=11,
+            transaction_start=1000,
+            scan_stop=4,
+            setpoint_values=(600, 650),
+            coil_values=(True,),
+        )
+
+        first = build_generated_modbus_attack_cases(options)
+        second = build_generated_modbus_attack_cases(options)
+        loaded = benchmark_cases_from_payload(benchmark_cases_to_payload(first))
+
+        self.assertEqual(benchmark_cases_to_payload(first), benchmark_cases_to_payload(second))
+        self.assertEqual(len(loaded), 6)
+        self.assertEqual(sum(len(case.steps) for case in loaded), 35)
+        transaction_case = next(
+            case
+            for case in loaded
+            if case.case_id == "generated_modbus_transaction_abuse_seed_11"
+        )
+        self.assertEqual(
+            transaction_case.steps[1].expected_protocol_status.value,
+            "anomalous",
+        )
+
+    def test_generated_attack_options_can_override_process_bindings(self) -> None:
+        options = ModbusAttackGenerationOptions(
+            seed=13,
+            transaction_start=1200,
+            scan_stop=2,
+            tables=(ModbusTableSpec("custom_holding", 3, 4),),
+            setpoint_register_address=10,
+            mode_register_address=11,
+            pump_coil_address=20,
+            inlet_coil_address=21,
+            setpoint_variable="reactor_temp_sp",
+            pump_variable="feed_pump_cmd",
+            inlet_variable="purge_valve_open",
+            encoded_setpoint_scale=0.01,
+            setpoint_values=(1234,),
+            coil_values=(False,),
+            include_recon_sweep=False,
+            include_exception_probing=False,
+            include_transaction_abuse=False,
+            include_multi_session_interleave=False,
+        )
+
+        cases = build_generated_modbus_attack_cases(options)
+        write_case = next(
+            case
+            for case in cases
+            if case.case_id == "generated_modbus_write_readback_seed_13"
+        )
+        batch_case = next(
+            case
+            for case in cases
+            if case.case_id == "generated_modbus_batch_writes_seed_13"
+        )
+
+        setpoint_write = parse_modbus_tcp_request(write_case.steps[0].request_hex)
+        setpoint_readback = parse_modbus_tcp_request(write_case.steps[1].request_hex)
+        coil_write = parse_modbus_tcp_request(write_case.steps[2].request_hex)
+        batch_register_write = parse_modbus_tcp_request(batch_case.steps[0].request_hex)
+        batch_coil_write = parse_modbus_tcp_request(batch_case.steps[2].request_hex)
+
+        self.assertEqual(setpoint_write.address, 10)
+        self.assertEqual(setpoint_readback.address, 10)
+        self.assertEqual(coil_write.address, 20)
+        self.assertEqual(batch_register_write.address, 10)
+        self.assertEqual(batch_coil_write.address, 20)
+        self.assertEqual(
+            write_case.steps[0].expected_process_values,
+            {"reactor_temp_sp": 12.34},
+        )
+        self.assertEqual(
+            batch_case.steps[2].expected_process_values,
+            {"feed_pump_cmd": 0.0, "purge_valve_open": 1.0},
+        )
+
     def test_send_request_and_decode_live_modbus_response(self) -> None:
         state = _ProcessState()
         modbus_server = _start_modbus_server(state)
@@ -103,6 +186,41 @@ class LiveModbusBenchmarkTests(unittest.TestCase):
                 exception_result = report.cases["live_modbus_exception_probing"][0]
                 self.assertTrue(exception_result.response_is_exception)
                 self.assertEqual(exception_result.exception_code, 2)
+            finally:
+                _stop_server(modbus_server)
+                _stop_server(hmi_server)
+
+    def test_runner_passes_generated_attack_suite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            event_log = Path(directory) / "events.jsonl"
+            state = _ProcessState(event_log_path=event_log)
+            modbus_server = _start_modbus_server(state)
+            hmi_server = _start_hmi_server(state)
+            try:
+                options = ModbusAttackGenerationOptions(
+                    seed=9,
+                    transaction_start=900,
+                    scan_stop=3,
+                    setpoint_values=(600,),
+                    coil_values=(True, False),
+                )
+                cases = build_generated_modbus_attack_cases(options)
+
+                report = LiveModbusBenchmarkRunner(
+                    host="127.0.0.1",
+                    port=modbus_server.server_address[1],
+                    hmi_observer=HMIStateObserver(
+                        f"http://127.0.0.1:{hmi_server.server_address[1]}/api/state"
+                    ),
+                    event_log_path=event_log,
+                ).run(cases)
+
+                self.assertTrue(report.passed)
+                self.assertEqual(report.total_steps, 31)
+                self.assertEqual(
+                    report.status_counts(),
+                    {"allowed": 30, "anomalous": 1},
+                )
             finally:
                 _stop_server(modbus_server)
                 _stop_server(hmi_server)
@@ -197,7 +315,7 @@ class _ProcessState:
         self.inlet_valve_open = True
         self.high_level_alarm = False
         self.event_log_path = event_log_path
-        self.transaction_signatures: dict[int, str] = {}
+        self.transaction_signatures_by_session: dict[str, dict[int, str]] = {}
 
 
 class _ReusableTCPServer(socketserver.ThreadingTCPServer):
@@ -217,7 +335,10 @@ class _ModbusHandler(socketserver.BaseRequestHandler):
             except ConnectionError:
                 return
 
-            self.server.state.append_event(request.hex())
+            self.server.state.append_event(
+                request.hex(),
+                session_key=f"{self.client_address[0]}:{self.client_address[1]}",
+            )
             response_hex = self.server.state.response_for(parsed)
             self.request.sendall(bytes.fromhex(response_hex))
 
@@ -324,12 +445,16 @@ class _ServerState:
             return None
         return block[address : address + count]
 
-    def append_event(self, request_hex: str) -> None:
+    def append_event(self, request_hex: str, *, session_key: str) -> None:
         if self.process_state.event_log_path is None:
             return
         parsed = parse_modbus_tcp_request(request_hex)
         signature = request_hex[4:]
-        previous_signature = self.process_state.transaction_signatures.get(
+        signatures = self.process_state.transaction_signatures_by_session.setdefault(
+            session_key,
+            {},
+        )
+        previous_signature = signatures.get(
             parsed.transaction_id
         )
         status = (
@@ -337,7 +462,7 @@ class _ServerState:
             if previous_signature is not None and previous_signature != signature
             else "allowed"
         )
-        self.process_state.transaction_signatures[parsed.transaction_id] = signature
+        signatures[parsed.transaction_id] = signature
         with self.process_state.event_log_path.open("a", encoding="utf-8") as handle:
             handle.write(
                 json.dumps(

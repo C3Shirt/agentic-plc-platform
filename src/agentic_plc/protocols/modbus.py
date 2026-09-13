@@ -135,6 +135,129 @@ def parse_modbus_tcp_frame(payload_hex: str) -> ModbusTcpFrame:
     )
 
 
+def build_modbus_tcp_read_request(
+    *,
+    transaction_id: int,
+    unit_id: int,
+    function_code: int,
+    address: int,
+    count: int,
+) -> str:
+    if function_code not in {1, 2, 3, 4}:
+        raise ModbusFrameError("read request function_code must be 1, 2, 3, or 4")
+    _validate_u16(address, "address")
+    _validate_u16(count, "count")
+    if count <= 0:
+        raise ModbusFrameError("read request count must be positive")
+    return _build_frame(
+        transaction_id=transaction_id,
+        unit_id=unit_id,
+        pdu=bytes(
+            [
+                function_code,
+                *_u16_bytes(address),
+                *_u16_bytes(count),
+            ]
+        ),
+    )
+
+
+def build_modbus_tcp_write_single_coil_request(
+    *,
+    transaction_id: int,
+    unit_id: int,
+    address: int,
+    energized: bool,
+) -> str:
+    return _build_frame(
+        transaction_id=transaction_id,
+        unit_id=unit_id,
+        pdu=bytes(
+            [
+                5,
+                *_u16_bytes(address),
+                *_u16_bytes(0xFF00 if energized else 0x0000),
+            ]
+        ),
+    )
+
+
+def build_modbus_tcp_write_single_register_request(
+    *,
+    transaction_id: int,
+    unit_id: int,
+    address: int,
+    value: int,
+) -> str:
+    return _build_frame(
+        transaction_id=transaction_id,
+        unit_id=unit_id,
+        pdu=bytes([6, *_u16_bytes(address), *_u16_bytes(value)]),
+    )
+
+
+def build_modbus_tcp_write_multiple_coils_request(
+    *,
+    transaction_id: int,
+    unit_id: int,
+    address: int,
+    values: Sequence[int | bool],
+) -> str:
+    if not values:
+        raise ModbusFrameError("multiple-coil write requires at least one value")
+    if len(values) > 1968:
+        raise ModbusFrameError("multiple-coil write count is too large")
+    packed = bytearray()
+    for offset in range(0, len(values), 8):
+        byte_value = 0
+        for bit, value in enumerate(values[offset : offset + 8]):
+            if int(bool(value)):
+                byte_value |= 1 << bit
+        packed.append(byte_value)
+    return _build_frame(
+        transaction_id=transaction_id,
+        unit_id=unit_id,
+        pdu=bytes(
+            [
+                15,
+                *_u16_bytes(address),
+                *_u16_bytes(len(values)),
+                len(packed),
+                *packed,
+            ]
+        ),
+    )
+
+
+def build_modbus_tcp_write_multiple_registers_request(
+    *,
+    transaction_id: int,
+    unit_id: int,
+    address: int,
+    values: Sequence[int],
+) -> str:
+    if not values:
+        raise ModbusFrameError("multiple-register write requires at least one value")
+    if len(values) > 123:
+        raise ModbusFrameError("multiple-register write count is too large")
+    encoded_values = bytearray()
+    for value in values:
+        encoded_values.extend(_u16_bytes(value))
+    return _build_frame(
+        transaction_id=transaction_id,
+        unit_id=unit_id,
+        pdu=bytes(
+            [
+                16,
+                *_u16_bytes(address),
+                *_u16_bytes(len(values)),
+                len(encoded_values),
+                *encoded_values,
+            ]
+        ),
+    )
+
+
 def build_modbus_tcp_read_registers_response(
     transaction_id: int,
     unit_id: int,

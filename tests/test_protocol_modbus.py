@@ -3,10 +3,15 @@ import unittest
 from agentic_plc.protocols.modbus import (
     ModbusFrameError,
     build_modbus_tcp_exception_response,
+    build_modbus_tcp_read_request,
     build_modbus_tcp_read_bits_response,
     build_modbus_tcp_read_registers_response,
     build_modbus_tcp_response_from_request,
+    build_modbus_tcp_write_multiple_coils_request,
+    build_modbus_tcp_write_multiple_registers_request,
     build_modbus_tcp_write_multiple_response,
+    build_modbus_tcp_write_single_coil_request,
+    build_modbus_tcp_write_single_register_request,
     build_modbus_tcp_write_single_response,
     parse_modbus_tcp_frame,
     parse_modbus_tcp_request,
@@ -14,6 +19,61 @@ from agentic_plc.protocols.modbus import (
 
 
 class ModbusProtocolTests(unittest.TestCase):
+    def test_build_read_request(self) -> None:
+        payload_hex = build_modbus_tcp_read_request(
+            transaction_id=17,
+            unit_id=1,
+            function_code=3,
+            address=0,
+            count=2,
+        )
+
+        parsed = parse_modbus_tcp_request(payload_hex)
+
+        self.assertEqual(parsed.transaction_id, 17)
+        self.assertEqual(parsed.function_code, 3)
+        self.assertEqual(parsed.address, 0)
+        self.assertEqual(parsed.count, 2)
+
+    def test_build_write_requests(self) -> None:
+        single_register = parse_modbus_tcp_request(
+            build_modbus_tcp_write_single_register_request(
+                transaction_id=18,
+                unit_id=1,
+                address=5,
+                value=700,
+            )
+        )
+        single_coil = parse_modbus_tcp_request(
+            build_modbus_tcp_write_single_coil_request(
+                transaction_id=19,
+                unit_id=1,
+                address=0,
+                energized=True,
+            )
+        )
+        multiple_registers = parse_modbus_tcp_request(
+            build_modbus_tcp_write_multiple_registers_request(
+                transaction_id=20,
+                unit_id=1,
+                address=0,
+                values=(700, 720),
+            )
+        )
+        multiple_coils = parse_modbus_tcp_request(
+            build_modbus_tcp_write_multiple_coils_request(
+                transaction_id=21,
+                unit_id=1,
+                address=0,
+                values=(1, 0, 1),
+            )
+        )
+
+        self.assertEqual(single_register.values, (700,))
+        self.assertEqual(single_coil.values, (0xFF00,))
+        self.assertEqual(multiple_registers.values, (700, 720))
+        self.assertEqual(multiple_coils.values, (1, 0, 1))
+
     def test_build_and_parse_read_registers_response(self) -> None:
         payload_hex = build_modbus_tcp_read_registers_response(
             transaction_id=17,

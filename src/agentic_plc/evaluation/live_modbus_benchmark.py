@@ -28,6 +28,11 @@ from agentic_plc.policy.protocol_reply_validator import ProtocolReplyValidator
 from agentic_plc.protocols.modbus import (
     ModbusFrameError,
     ModbusTcpFrame,
+    build_modbus_tcp_read_request,
+    build_modbus_tcp_write_multiple_coils_request,
+    build_modbus_tcp_write_multiple_registers_request,
+    build_modbus_tcp_write_single_coil_request,
+    build_modbus_tcp_write_single_register_request,
     parse_modbus_tcp_frame,
 )
 
@@ -727,15 +732,25 @@ class LiveModbusBenchmarkRunner:
     def run_case(self, case: BenchmarkCase) -> tuple[LiveBenchmarkStepResult, ...]:
         results: list[LiveBenchmarkStepResult] = []
         if self._reuse_connection_per_case:
-            with ModbusTcpClient(
-                self._host,
-                self._port,
-                timeout_seconds=self._timeout_seconds,
-            ) as client:
+            clients: dict[str, ModbusTcpClient] = {}
+            try:
                 for step in case.steps:
                     if step.tick_seconds_before > 0:
                         time.sleep(step.tick_seconds_before)
+                    session_id = step.event.session_id or case.case_id
+                    client = clients.get(session_id)
+                    if client is None:
+                        client = ModbusTcpClient(
+                            self._host,
+                            self._port,
+                            timeout_seconds=self._timeout_seconds,
+                        )
+                        client.connect()
+                        clients[session_id] = client
                     results.append(self.run_step(step, client=client))
+            finally:
+                for client in clients.values():
+                    client.close()
             return tuple(results)
 
         for step in case.steps:
@@ -1383,11 +1398,12 @@ def _modbus_read_request(
     count: int,
     unit_id: int = 1,
 ) -> str:
-    return _modbus_request_frame_hex(
+    return build_modbus_tcp_read_request(
         transaction_id=transaction_id,
-        function_code=function_code,
-        data=address.to_bytes(2, "big") + count.to_bytes(2, "big"),
         unit_id=unit_id,
+        function_code=function_code,
+        address=address,
+        count=count,
     )
 
 
@@ -1398,12 +1414,11 @@ def _modbus_write_single_coil_request(
     energized: bool,
     unit_id: int = 1,
 ) -> str:
-    value = 0xFF00 if energized else 0x0000
-    return _modbus_request_frame_hex(
+    return build_modbus_tcp_write_single_coil_request(
         transaction_id=transaction_id,
-        function_code=5,
-        data=address.to_bytes(2, "big") + value.to_bytes(2, "big"),
         unit_id=unit_id,
+        address=address,
+        energized=energized,
     )
 
 
@@ -1414,11 +1429,11 @@ def _modbus_write_single_register_request(
     value: int,
     unit_id: int = 1,
 ) -> str:
-    return _modbus_request_frame_hex(
+    return build_modbus_tcp_write_single_register_request(
         transaction_id=transaction_id,
-        function_code=6,
-        data=address.to_bytes(2, "big") + int(value).to_bytes(2, "big"),
         unit_id=unit_id,
+        address=address,
+        value=value,
     )
 
 
@@ -1429,21 +1444,11 @@ def _modbus_write_multiple_registers_request(
     values: Iterable[int],
     unit_id: int = 1,
 ) -> str:
-    encoded_values = bytearray()
-    count = 0
-    for value in values:
-        encoded_values.extend(int(value).to_bytes(2, "big"))
-        count += 1
-    return _modbus_request_frame_hex(
+    return build_modbus_tcp_write_multiple_registers_request(
         transaction_id=transaction_id,
-        function_code=16,
-        data=(
-            address.to_bytes(2, "big")
-            + count.to_bytes(2, "big")
-            + bytes([len(encoded_values)])
-            + bytes(encoded_values)
-        ),
         unit_id=unit_id,
+        address=address,
+        values=tuple(values),
     )
 
 
@@ -1454,24 +1459,11 @@ def _modbus_write_multiple_coils_request(
     values: Iterable[int | bool],
     unit_id: int = 1,
 ) -> str:
-    bits = [int(bool(value)) for value in values]
-    packed = bytearray()
-    for offset in range(0, len(bits), 8):
-        byte_value = 0
-        for bit, value in enumerate(bits[offset : offset + 8]):
-            if value:
-                byte_value |= 1 << bit
-        packed.append(byte_value)
-    return _modbus_request_frame_hex(
+    return build_modbus_tcp_write_multiple_coils_request(
         transaction_id=transaction_id,
-        function_code=15,
-        data=(
-            address.to_bytes(2, "big")
-            + len(bits).to_bytes(2, "big")
-            + bytes([len(packed)])
-            + bytes(packed)
-        ),
         unit_id=unit_id,
+        address=address,
+        values=tuple(values),
     )
 
 

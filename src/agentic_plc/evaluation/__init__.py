@@ -37,6 +37,12 @@ from agentic_plc.evaluation.live_modbus_benchmark import (
     decode_modbus_response_values,
     send_modbus_tcp_request,
 )
+from agentic_plc.evaluation.modbus_attack_generator import (
+    ModbusAttackGenerationOptions,
+    ModbusTableSpec,
+    build_generated_modbus_attack_cases,
+    modbus_attack_generation_metadata,
+)
 from agentic_plc.evaluation.physical_invariants import (
     InvariantComparison,
     ProcessInvariant,
@@ -69,6 +75,8 @@ __all__ = [
     "LiveBenchmarkStepResult",
     "LiveModbusBenchmarkRunner",
     "ModbusTcpClient",
+    "ModbusAttackGenerationOptions",
+    "ModbusTableSpec",
     "ProcessInvariant",
     "ProcessInvariantEvaluator",
     "ProcessInvariantKind",
@@ -76,6 +84,7 @@ __all__ = [
     "TrendDirection",
     "build_default_modbus_consistency_cases",
     "build_default_live_modbus_cases",
+    "build_generated_modbus_attack_cases",
     "create_benchmark_process_context",
     "decode_modbus_response_values",
     "import_cic_modbus_benchmark",
@@ -83,5 +92,6 @@ __all__ = [
     "recommended_tshark_command",
     "recommended_tshark_fields",
     "send_modbus_tcp_request",
+    "modbus_attack_generation_metadata",
     "write_benchmark_payload",
 ]

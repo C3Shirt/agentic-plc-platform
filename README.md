@@ -259,6 +259,39 @@ By default, all steps in one case reuse the same TCP connection so session-level
 protocol behavior can be tested. Use `--no-reuse-connection-per-case` when
 testing a server that closes the connection after each request.
 
+Generate a larger deterministic live Modbus attack suite when you need more
+complex protocol traffic:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\generate_live_modbus_attack_benchmark.py `
+  --seed 9 `
+  --scan-stop 8 `
+  --setpoint 600 `
+  --setpoint 650 `
+  --coil on `
+  --coil off `
+  --output records\generated_live_modbus_attack.json `
+  --quiet
+
+python tools\run_live_modbus_benchmark.py `
+  --input records\generated_live_modbus_attack.json `
+  --host 127.0.0.1 `
+  --port 1502 `
+  --hmi-state-url http://127.0.0.1:8080/api/state `
+  --event-log records\honeypot_events.jsonl `
+  --output records\generated_live_modbus_attack_report.json
+```
+
+The generated suite emits seeded reconnaissance sweeps across Modbus tables,
+control writes with read-back checks, function-15/function-16 batch writes,
+invalid-address probes that should return exception code 2, same-session
+transaction-id abuse that should be flagged by telemetry, and interleaved
+multi-session transaction-id reuse that should remain allowed. This gives us a
+repeatable way to stress both protocol-state consistency and physical-process
+state consistency without depending on a public ICS benchmark that already has
+the same process ground truth.
+
 Benchmark JSON supports optional per-step physical invariants:
 
 ```json
