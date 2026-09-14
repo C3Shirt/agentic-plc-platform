@@ -22,6 +22,9 @@ from agentic_plc.evaluation import (
     build_default_modbus_consistency_cases,
     build_default_live_modbus_cases,
     decode_modbus_response_values,
+    hmi_register_bindings_from_scenario,
+    modbus_attack_options_from_scenario,
+    modbus_points_from_scenario,
     send_modbus_tcp_request,
 )
 from agentic_plc.protocols.modbus import (
@@ -142,6 +145,97 @@ class LiveModbusBenchmarkTests(unittest.TestCase):
             batch_case.steps[2].expected_process_values,
             {"feed_pump_cmd": 0.0, "purge_valve_open": 1.0},
         )
+
+    def test_generated_attack_options_can_be_loaded_from_te_scenario(self) -> None:
+        scenario_path = Path("scenarios/tennessee_eastman/scenario.json")
+
+        options = modbus_attack_options_from_scenario(
+            scenario_path,
+            seed=21,
+            scan_stop=3,
+        )
+        cases = build_generated_modbus_attack_cases(options)
+        bindings = hmi_register_bindings_from_scenario(scenario_path)
+
+        self.assertEqual(options.profile, "tennessee_eastman_reactor_separator_cell")
+        self.assertEqual(options.setpoint_register_address, 0)
+        self.assertEqual(options.mode_register_address, 1)
+        self.assertIsNone(options.pump_coil_address)
+        self.assertEqual(options.setpoint_variable, "xset_08")
+        self.assertFalse(options.include_setpoint_bounds_invariant)
+        self.assertEqual(len(cases), 6)
+        self.assertEqual(sum(len(case.steps) for case in cases), 22)
+        self.assertFalse(
+            any(
+                "pump_coil" in step.step_id
+                for case in cases
+                for step in case.steps
+            )
+        )
+        self.assertEqual(bindings[0].state_key, "xset_08")
+        self.assertEqual(bindings[1].scale, 10.0)
+
+    def test_scenario_driven_scan_uses_exact_sparse_addresses(self) -> None:
+        scenario = {
+            "scenario_id": "sparse_process",
+            "points": [
+                {
+                    "variable_id": "reactor_level",
+                    "protocol": "modbus",
+                    "table": "input_registers",
+                    "address": 10,
+                    "access": "read",
+                    "scale": 10.0,
+                },
+                {
+                    "variable_id": "reactor_sp",
+                    "protocol": "modbus",
+                    "table": "holding_registers",
+                    "address": 20,
+                    "access": "read_write",
+                    "scale": 10.0,
+                },
+            ],
+        }
+
+        options = modbus_attack_options_from_scenario(
+            scenario,
+            seed=31,
+            scan_start=9,
+            scan_stop=12,
+            include_write_readback=False,
+            include_batch_writes=False,
+            include_exception_probing=False,
+            include_transaction_abuse=False,
+            include_multi_session_interleave=False,
+        )
+        cases = build_generated_modbus_attack_cases(options)
+        scan_case = cases[0]
+        status_by_address = {
+            parse_modbus_tcp_request(step.request_hex).address: step.expected_response_kind
+            for step in scan_case.steps
+            if step.event.operation == "read_input_registers"
+        }
+
+        self.assertEqual(options.tables[0].mapped_addresses, (20,))
+        self.assertEqual(options.tables[1].mapped_addresses, (10,))
+        self.assertEqual(status_by_address, {9: "exception", 10: "normal", 11: "exception"})
+
+    def test_legacy_tank_pump_register_map_can_be_loaded_as_scenario(self) -> None:
+        points = modbus_points_from_scenario(Path("scenarios/tank_pump/scenario.json"))
+        options = modbus_attack_options_from_scenario(
+            Path("scenarios/tank_pump/scenario.json"),
+            seed=41,
+            scan_stop=2,
+        )
+
+        self.assertEqual(len(points), 7)
+        self.assertEqual(options.profile, "tank_pump_v1")
+        self.assertEqual(options.setpoint_register_address, 0)
+        self.assertEqual(options.mode_register_address, 1)
+        self.assertEqual(options.pump_coil_address, 0)
+        self.assertEqual(options.inlet_coil_address, 1)
+        self.assertEqual(options.encoded_setpoint_scale, 0.1)
 
     def test_send_request_and_decode_live_modbus_response(self) -> None:
         state = _ProcessState()

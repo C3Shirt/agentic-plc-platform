@@ -292,6 +292,35 @@ repeatable way to stress both protocol-state consistency and physical-process
 state consistency without depending on a public ICS benchmark that already has
 the same process ground truth.
 
+The same generator can be driven by a physical-process scenario mapping. For
+example, the TE reactor/separator scenario exposes input and holding registers
+but no coils, so the generated suite automatically omits coil-write cases while
+keeping register writes, scan probes, exception probes, and transaction-state
+checks:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\generate_live_modbus_attack_benchmark.py `
+  --scenario scenarios\tennessee_eastman\scenario.json `
+  --seed 21 `
+  --output records\generated_te_live_modbus_attack.json `
+  --quiet
+
+python tools\run_live_modbus_benchmark.py `
+  --input records\generated_te_live_modbus_attack.json `
+  --scenario scenarios\tennessee_eastman\scenario.json `
+  --host 127.0.0.1 `
+  --port 1502 `
+  --hmi-state-url http://127.0.0.1:8080/api/state `
+  --event-log records\honeypot_events.jsonl `
+  --output records\generated_te_live_modbus_attack_report.json
+```
+
+For future physical processes, provide a scenario JSON with Modbus `points[]`
+entries (`table`, `address`, `access`, `scale`, and `variable_id`). The
+generator infers table sizes, exact mapped addresses, writable register/coil
+capabilities, and HMI reply-snapshot bindings from that file.
+
 Benchmark JSON supports optional per-step physical invariants:
 
 ```json

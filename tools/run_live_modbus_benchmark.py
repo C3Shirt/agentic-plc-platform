@@ -11,6 +11,7 @@ from agentic_plc.evaluation import (
     HMIStateObserver,
     LiveModbusBenchmarkRunner,
     build_default_live_modbus_cases,
+    hmi_register_bindings_from_scenario,
     load_benchmark_cases,
     write_benchmark_payload,
 )
@@ -34,6 +35,15 @@ def main() -> int:
         help=(
             "Benchmark JSON containing a top-level cases list. If omitted, "
             "the built-in live Modbus suite is used."
+        ),
+    )
+    parser.add_argument(
+        "--scenario",
+        type=Path,
+        help=(
+            "Optional physical-process scenario JSON. When supplied with "
+            "--hmi-state-url, read-reply physical invariants use scenario "
+            "register bindings instead of the built-in tank-pump bindings."
         ),
     )
     parser.add_argument(
@@ -94,11 +104,18 @@ def main() -> int:
         wanted = set(args.case_id)
         cases = tuple(case for case in cases if case.case_id in wanted)
 
-    observer = (
-        HMIStateObserver(args.hmi_state_url, timeout_seconds=args.timeout)
-        if args.hmi_state_url
-        else None
-    )
+    observer = None
+    if args.hmi_state_url:
+        observer_kwargs = {}
+        if args.scenario is not None:
+            observer_kwargs["register_bindings"] = hmi_register_bindings_from_scenario(
+                args.scenario
+            )
+        observer = HMIStateObserver(
+            args.hmi_state_url,
+            timeout_seconds=args.timeout,
+            **observer_kwargs,
+        )
     report = LiveModbusBenchmarkRunner(
         host=args.host,
         port=args.port,

@@ -24,6 +24,7 @@ from agentic_plc.evaluation.physical_invariants import (
     ProcessInvariantResult,
     TrendDirection,
 )
+from agentic_plc.evaluation.modbus_scenario import modbus_points_from_scenario
 from agentic_plc.policy.protocol_reply_validator import ProtocolReplyValidator
 from agentic_plc.protocols.modbus import (
     ModbusFrameError,
@@ -94,6 +95,27 @@ DEFAULT_HMI_REGISTER_BINDINGS: tuple[HMIRegisterBinding, ...] = (
     HMIRegisterBinding(4, 0, "level_percent", scale=10.0),
     HMIRegisterBinding(4, 1, "pressure_bar", scale=100.0),
 )
+
+
+def hmi_register_bindings_from_scenario(
+    scenario: str | Path | Mapping[str, Any] | object,
+) -> tuple[HMIRegisterBinding, ...]:
+    """Build HMI reply-snapshot bindings from a Modbus process scenario.
+
+    The default assumption is that the HMI state endpoint exposes canonical
+    process variable IDs. Tank-pump's built-in observer keeps its hand-written
+    aliases; scenario-driven TE or future backends can use this helper instead.
+    """
+
+    return tuple(
+        HMIRegisterBinding(
+            point.function_code,
+            point.address,
+            point.variable_id,
+            scale=point.scale,
+        )
+        for point in modbus_points_from_scenario(scenario)
+    )
 
 
 def build_default_live_modbus_cases() -> tuple[BenchmarkCase, ...]:

@@ -35,13 +35,21 @@ from agentic_plc.evaluation.live_modbus_benchmark import (
     ModbusTcpClient,
     build_default_live_modbus_cases,
     decode_modbus_response_values,
+    hmi_register_bindings_from_scenario,
     send_modbus_tcp_request,
 )
 from agentic_plc.evaluation.modbus_attack_generator import (
     ModbusAttackGenerationOptions,
     ModbusTableSpec,
     build_generated_modbus_attack_cases,
+    modbus_attack_options_from_scenario,
     modbus_attack_generation_metadata,
+)
+from agentic_plc.evaluation.modbus_scenario import (
+    MODBUS_TABLE_FUNCTION_CODES,
+    ScenarioModbusPoint,
+    modbus_points_from_scenario,
+    scenario_id_from_source,
 )
 from agentic_plc.evaluation.physical_invariants import (
     InvariantComparison,
@@ -77,10 +85,12 @@ __all__ = [
     "ModbusTcpClient",
     "ModbusAttackGenerationOptions",
     "ModbusTableSpec",
+    "MODBUS_TABLE_FUNCTION_CODES",
     "ProcessInvariant",
     "ProcessInvariantEvaluator",
     "ProcessInvariantKind",
     "ProcessInvariantResult",
+    "ScenarioModbusPoint",
     "TrendDirection",
     "build_default_modbus_consistency_cases",
     "build_default_live_modbus_cases",
@@ -89,9 +99,13 @@ __all__ = [
     "decode_modbus_response_values",
     "import_cic_modbus_benchmark",
     "load_benchmark_cases",
+    "hmi_register_bindings_from_scenario",
+    "modbus_attack_options_from_scenario",
+    "modbus_attack_generation_metadata",
+    "modbus_points_from_scenario",
     "recommended_tshark_command",
     "recommended_tshark_fields",
     "send_modbus_tcp_request",
-    "modbus_attack_generation_metadata",
+    "scenario_id_from_source",
     "write_benchmark_payload",
 ]

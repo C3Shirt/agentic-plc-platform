@@ -42,6 +42,45 @@ class ModbusAttackGeneratorCliTests(unittest.TestCase):
             37,
         )
 
+    def test_cli_can_generate_from_te_scenario(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "generated_te_attack.json"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "tools/generate_live_modbus_attack_benchmark.py",
+                    "--scenario",
+                    "scenarios/tennessee_eastman/scenario.json",
+                    "--seed",
+                    "7",
+                    "--scan-stop",
+                    "3",
+                    "--output",
+                    str(output_path),
+                    "--quiet",
+                ],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(
+            payload["metadata"]["profile"],
+            "tennessee_eastman_reactor_separator_cell",
+        )
+        self.assertIsNone(payload["metadata"]["bindings"]["pump_coil_address"])
+        self.assertEqual(len(payload["cases"]), 6)
+        self.assertEqual(
+            sum(len(case["steps"]) for case in payload["cases"]),
+            22,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
