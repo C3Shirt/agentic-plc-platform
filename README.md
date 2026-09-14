@@ -210,7 +210,14 @@ python tools\smoke_protocol_interaction.py
 python tools\smoke_protocol_state_machine.py
 python tools\smoke_modbus_responses.py
 python tools\smoke_process_write_through.py
+python tools\smoke_te_live_benchmark.py --synthetic
 ```
+
+`smoke_te_live_benchmark.py` starts a lightweight scenario-backed Modbus TCP
+endpoint and a JSON HMI endpoint, then runs the generated live Modbus benchmark
+against them. It uses downloaded TE assets when available; otherwise
+`--synthetic` runs the same protocol/process consistency path against a small
+temporary TE-shaped trace.
 
 Generate and run the local consistency benchmark:
 
