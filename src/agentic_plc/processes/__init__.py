@@ -1,9 +1,23 @@
+from .agentic import (
+    AgenticProcessBackend,
+    NoOpPhysicalProcessAgentPolicy,
+    PhysicalProcessAgentContext,
+    PhysicalProcessAgentMemoryEntry,
+    PhysicalProcessAgentPolicy,
+    SetpointTrackingProcessAgentPolicy,
+    SetpointTrackingRule,
+)
 from .base import (
     ProcessBackend,
     ProcessSnapshot,
     ProcessVariable,
     ReadOnlyProcessVariable,
     UnknownProcessVariable,
+)
+from .formula import (
+    FormulaEquation,
+    FormulaExpressionError,
+    FormulaProcessBackend,
 )
 from .patch import ProcessPatchApplier, ProcessPatchPolicy
 from .registry import ProcessBackendRegistry
@@ -14,23 +28,41 @@ from .registers import (
     ProcessRegisterWritePlan,
 )
 from .scenario import ProtocolPointMapping, ScenarioMapping
+from .snapshot import (
+    ProcessSnapshotManager,
+    ProcessSnapshotRecord,
+    ProcessSnapshotTransition,
+)
 from .tennessee_eastman import TennesseeEastmanTraceBackend
 from .trace import TraceProcessBackend
 
 __all__ = [
+    "AgenticProcessBackend",
+    "NoOpPhysicalProcessAgentPolicy",
+    "PhysicalProcessAgentContext",
+    "PhysicalProcessAgentMemoryEntry",
+    "PhysicalProcessAgentPolicy",
     "ProcessBackend",
     "ProcessBackendRegistry",
     "ProcessPatchApplier",
     "ProcessPatchPolicy",
+    "FormulaEquation",
+    "FormulaExpressionError",
+    "FormulaProcessBackend",
     "ProcessRegisterMap",
     "ProcessRegisterReadOnlyError",
     "ProcessRegisterWriteError",
     "ProcessRegisterWritePlan",
     "ProcessSnapshot",
+    "ProcessSnapshotManager",
+    "ProcessSnapshotRecord",
+    "ProcessSnapshotTransition",
     "ProcessVariable",
     "ProtocolPointMapping",
     "ReadOnlyProcessVariable",
     "ScenarioMapping",
+    "SetpointTrackingProcessAgentPolicy",
+    "SetpointTrackingRule",
     "TennesseeEastmanTraceBackend",
     "TraceProcessBackend",
     "UnknownProcessVariable",

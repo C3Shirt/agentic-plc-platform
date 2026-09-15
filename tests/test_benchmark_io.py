@@ -14,6 +14,7 @@ from agentic_plc.evaluation import (
     benchmark_cases_from_payload,
     benchmark_cases_to_payload,
     build_default_modbus_consistency_cases,
+    build_formula_process_consistency_cases,
     load_benchmark_cases,
     write_benchmark_payload,
 )
@@ -40,7 +41,20 @@ class BenchmarkIOTests(unittest.TestCase):
         report = ConsistencyBenchmarkRunner().run(loaded_cases)
 
         self.assertTrue(report.passed)
-        self.assertEqual(report.total_steps, 9)
+        self.assertEqual(report.total_steps, 13)
+        self.assertIn("memory_consistency", report.check_group_counts())
+
+    def test_round_trips_formula_process_cases_with_after_tick(self) -> None:
+        original_cases = build_formula_process_consistency_cases()
+        loaded_cases = benchmark_cases_from_payload(
+            benchmark_cases_to_payload(original_cases)
+        )
+
+        self.assertEqual(loaded_cases[0].steps[0].tick_seconds_after, 1.0)
+        self.assertEqual(
+            loaded_cases[0].steps[0].expected_snapshot_revision_delta,
+            2,
+        )
 
     def test_loads_direct_case_object(self) -> None:
         case = build_default_modbus_consistency_cases()[0]
@@ -105,6 +119,50 @@ class BenchmarkIOTests(unittest.TestCase):
         self.assertIn("report", payload)
         self.assertTrue(payload["report"]["passed"])
         self.assertIn("modbus_write_then_readback", completed.stdout)
+
+    def test_cli_generates_and_replays_formula_suite(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            cases_path = temp_path / "formula_cases.json"
+            report_path = temp_path / "formula_report.json"
+            env = os.environ.copy()
+            env["PYTHONPATH"] = "src"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "tools/generate_consistency_benchmark.py",
+                    "--suite",
+                    "formula",
+                    "--cases-only",
+                    "--output",
+                    str(cases_path),
+                ],
+                check=True,
+                capture_output=True,
+                env=env,
+                text=True,
+            )
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "tools/run_consistency_benchmark.py",
+                    "--process-backend",
+                    "formula",
+                    "--input",
+                    str(cases_path),
+                    "--output",
+                    str(report_path),
+                ],
+                check=True,
+                capture_output=True,
+                env=env,
+                text=True,
+            )
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+
+        self.assertTrue(payload["report"]["passed"])
+        self.assertIn("formula_process_write_then_dynamics", completed.stdout)
 
 
 if __name__ == "__main__":

@@ -43,7 +43,23 @@ def benchmark_step_from_dict(data: Mapping[str, Any]) -> BenchmarkStep:
             for invariant in data.get("process_invariants", ())
             if isinstance(invariant, Mapping)
         ),
+        expected_snapshot_revision_delta=_optional_int(
+            data.get("expected_snapshot_revision_delta")
+        ),
+        expected_patch_base_revision_matches_before=_optional_bool(
+            data.get("expected_patch_base_revision_matches_before")
+        ),
+        expected_context_selected_variables=_optional_str_tuple(
+            data.get("expected_context_selected_variables")
+        ),
+        expected_actor_memory_event_count=_optional_int(
+            data.get("expected_actor_memory_event_count")
+        ),
+        expected_actor_memory_touched_variables=_optional_str_tuple(
+            data.get("expected_actor_memory_touched_variables")
+        ),
         tick_seconds_before=float(data.get("tick_seconds_before", 0.0)),
+        tick_seconds_after=float(data.get("tick_seconds_after", 0.0)),
         forced_reply_hex=_optional_str(data.get("forced_reply_hex")),
         expected_forced_reply_accepted=_optional_bool(
             data.get("expected_forced_reply_accepted")
@@ -171,6 +187,14 @@ def _optional_int_tuple(value: object) -> tuple[int, ...] | None:
     if not isinstance(value, list):
         raise ValueError("expected_reply_values must be a list or null")
     return tuple(int(item) for item in value)
+
+
+def _optional_str_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("expected string tuple fields must be lists")
+    return tuple(str(item) for item in value)
 
 
 def _float_mapping(value: object) -> dict[str, float]:

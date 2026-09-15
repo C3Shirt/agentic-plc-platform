@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agentic_plc.evaluation import (
     ConsistencyBenchmarkRunner,
+    create_formula_benchmark_process_context,
     load_benchmark_cases,
     write_benchmark_payload,
 )
@@ -34,10 +35,26 @@ def main() -> int:
         action="store_true",
         help="Exit with status 0 even when benchmark checks fail.",
     )
+    parser.add_argument(
+        "--process-backend",
+        choices=("default", "formula"),
+        default="default",
+        help=(
+            "Process context used while replaying cases. Use formula for "
+            "build_formula_process_consistency_cases artifacts."
+        ),
+    )
     args = parser.parse_args()
 
     cases = load_benchmark_cases(args.input)
-    report = ConsistencyBenchmarkRunner().run(cases)
+    runner = (
+        ConsistencyBenchmarkRunner(
+            process_context_factory=create_formula_benchmark_process_context,
+        )
+        if args.process_backend == "formula"
+        else ConsistencyBenchmarkRunner()
+    )
+    report = runner.run(cases)
     payload = {
         "cases": [case.to_dict() for case in cases],
         "report": report.to_dict(),

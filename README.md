@@ -81,10 +81,23 @@ deterministic response path.
   processes. `TraceProcessBackend` replays sampled plant traces, and
   `TennesseeEastmanTraceBackend` adapts TE `t/y/u/r.dat` files without coupling
   protocol adapters to TE-specific columns.
+- `FormulaProcessBackend` provides a lightweight equation-driven physical
+  process provider. It updates attacker-observable process variables with safe
+  arithmetic expressions over the current state and `dt`, clamps outputs to
+  engineering bounds, and still exposes the same `ProcessBackend` contract.
+- `AgenticProcessBackend` wraps any process backend with a generic
+  physical-process agent policy. The current deterministic baseline can evolve
+  read-only measurements toward setpoints through an internal, snapshot-governed
+  patch path, while attacker-facing protocol writes remain limited to declared
+  writable variables.
 - `ProcessRegisterMap` exposes any scenario-mapped backend as Modbus-style
   register reads/writes. It can also preview a protocol write without mutating
   the backend, so generated write acknowledgements can be paired with a
   validated process-state patch.
+- `ProcessSnapshotManager` governs authoritative process snapshots around
+  agent-generated patches. It rejects stale revision proposals, process/backend
+  mismatches, repeated paths, and non-finite values before a patch can mutate a
+  backend, then records before/after transition history for audit.
 - `scenarios/tennessee_eastman/scenario.json` maps a bounded TE
   reactor/separator control cell to Modbus-facing points.
 - `ProcessContextCompressor` applies Process-Aware Context Compression (PACC)
@@ -96,7 +109,16 @@ deterministic response path.
   Benchmark steps can also carry declarative physical invariants such as
   variable equality, declared bounds, cross-variable relations, trends,
   movement toward a target, and generated Modbus reply values matching the
-  current process snapshot.
+  current process snapshot. The offline report also groups checks into
+  protocol-state, generated-action, physical-process, snapshot-consistency, and
+  memory-consistency dimensions.
+- `build_formula_process_consistency_cases()` adds an optional dynamic-process
+  benchmark over `FormulaProcessBackend`: write a setpoint, tick the formula
+  backend, and verify that the next Modbus read encodes the evolved snapshot.
+- `docs/agentic_memory_literature_2026.md` and
+  `docs/references_agentic_plc.bib` record the current LLM honeypot,
+  agent-memory, context-compression, and world-model literature used to justify
+  the snapshot/memory-governed research direction.
 
 Default Conpot DataBus keys:
 
@@ -227,6 +249,8 @@ python tools\generate_consistency_benchmark.py
 python tools\generate_consistency_benchmark.py --output records\consistency_benchmark.json
 python tools\generate_consistency_benchmark.py --cases-only --output records\consistency_cases.json
 python tools\run_consistency_benchmark.py --input records\consistency_cases.json --output records\consistency_report.json
+python tools\generate_consistency_benchmark.py --suite formula --cases-only --output records\formula_consistency_cases.json
+python tools\run_consistency_benchmark.py --process-backend formula --input records\formula_consistency_cases.json --output records\formula_consistency_report.json
 ```
 
 Run the same case schema against a live Modbus TCP endpoint:
@@ -379,7 +403,9 @@ For one-off diagnostics, use `--model <name>` with either smoke script instead
 of editing `.env`.
 
 See `docs/architecture.md` for component boundaries and the implementation order.
-See `docs/process_backend_design.md` for the generic simulator-backend boundary.
+See `docs/process_backend_design.md` for the generic simulator-backend boundary,
+the physical-process-agent wrapper, and the optional configuration materials
+needed for higher-fidelity demos.
 See `docs/process_context_compression.md` for the paper-backed PACC design.
 See `docs/benchmark_landscape.md` for the public benchmark survey and why the
 local consistency benchmark is needed.

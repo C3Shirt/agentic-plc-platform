@@ -69,8 +69,12 @@ licensed standards. The default cases cover:
 - anomalous transaction-id reuse;
 - write-then-read-back physical consistency;
 - protocol-valid but physically invalid writes;
+- snapshot-revision governance across a multi-step actor session;
+- actor-memory and context-compression retention for touched PLC points;
 - generated-reply blocking when the protocol state machine denies the request.
 - declarative physical invariants over process snapshots and generated replies.
+- optional formula-process dynamics where a write is followed by a backend tick
+  and a readback from the evolved snapshot.
 
 The same schema can accept future benchmark adapters:
 
@@ -83,6 +87,17 @@ public dataset trace/pcap
 -> benchmark JSON artifact
 -> BenchmarkReport
 ```
+
+`BenchmarkReport.check_group_counts` now aggregates passing/failing checks into
+paper-facing groups:
+
+- `protocol_state`: protocol-FSM expectations;
+- `generated_action`: generated reply/world-patch gating;
+- `physical_process`: expected values and physical invariants;
+- `snapshot_consistency`: snapshot revision deltas and patch base-revision
+  preconditions;
+- `memory_consistency`: compressed context selection, actor event counts, and
+  touched-variable retention.
 
 Useful next extensions:
 
@@ -171,4 +186,49 @@ Example:
   "kind": "reply_matches_process_snapshot",
   "description": "Generated Modbus read values must be encoded from the current physical-process snapshot."
 }
+```
+
+## Snapshot and memory checks
+
+The benchmark schema also supports per-step snapshot/memory expectations:
+
+- `expected_snapshot_revision_delta`: expected change in the authoritative
+  process snapshot revision after the step;
+- `expected_patch_base_revision_matches_before`: whether accepted
+  `WorldPatch.metadata.base_revision` must match the pre-step snapshot;
+- `expected_context_selected_variables`: variables that must survive
+  process-aware context compression for the current request;
+- `expected_actor_memory_event_count`: expected number of same-actor events in
+  compact memory;
+- `expected_actor_memory_touched_variables`: process variables that the actor
+  memory must retain as previously touched.
+
+These checks are designed for the paper's core question: whether an agentic ICS
+honeypot can stay consistent over long protocol sessions without sending the
+LLM the full raw interaction history.
+
+## Formula-process dynamics
+
+`FormulaProcessBackend` adds a middle ground between static trace replay and
+high-fidelity numerical simulation. Benchmark steps can now specify
+`tick_seconds_after` so a write can be followed by a process tick before
+physical invariants are evaluated. This supports cases such as:
+
+```text
+write level setpoint -> apply validated WorldPatch -> tick formula backend
+                     -> check level moves toward setpoint
+                     -> read input register from evolved snapshot
+```
+
+The helper `build_formula_process_consistency_cases()` creates this dynamic
+case. It uses the same `BenchmarkCase`/`BenchmarkReport` schema, which means
+formula backends, TE traces, and future physical-process agents can be compared
+with the same consistency metrics.
+
+CLI example:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\generate_consistency_benchmark.py --suite formula --cases-only --output records\formula_consistency_cases.json
+python tools\run_consistency_benchmark.py --process-backend formula --input records\formula_consistency_cases.json --output records\formula_consistency_report.json
 ```

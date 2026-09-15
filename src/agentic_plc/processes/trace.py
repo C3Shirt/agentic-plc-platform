@@ -128,6 +128,18 @@ class TraceProcessBackend:
         self._overrides[variable_id] = numeric_value
         self._revision += 1
 
+    def write_internal(self, variable_id: str, value: float) -> None:
+        """Set a runtime override from simulator/physical-process dynamics."""
+
+        variable = self._require_variable(variable_id)
+        numeric_value = float(value)
+        if variable.minimum is not None and numeric_value < variable.minimum:
+            raise ValueError(f"{variable_id} below minimum {variable.minimum}")
+        if variable.maximum is not None and numeric_value > variable.maximum:
+            raise ValueError(f"{variable_id} above maximum {variable.maximum}")
+        self._overrides[variable_id] = numeric_value
+        self._revision += 1
+
     def tick(self, seconds: float = 1.0) -> None:
         if seconds <= 0:
             raise ValueError("seconds must be positive")

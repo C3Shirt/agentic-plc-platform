@@ -16,12 +16,15 @@ from agentic_plc.evaluation.cic_modbus_importer import (
 )
 from agentic_plc.evaluation.consistency_benchmark import (
     BenchmarkCase,
+    BenchmarkMemoryResult,
     BenchmarkReport,
     BenchmarkStep,
     BenchmarkStepResult,
     ConsistencyBenchmarkRunner,
     build_default_modbus_consistency_cases,
+    build_formula_process_consistency_cases,
     create_benchmark_process_context,
+    create_formula_benchmark_process_context,
 )
 from agentic_plc.evaluation.live_modbus_benchmark import (
     DEFAULT_HMI_REGISTER_BINDINGS,
@@ -72,6 +75,7 @@ from agentic_plc.evaluation.physical_invariants import (
 
 __all__ = [
     "BenchmarkCase",
+    "BenchmarkMemoryResult",
     "BenchmarkReport",
     "BenchmarkStep",
     "BenchmarkStepResult",
@@ -108,9 +112,11 @@ __all__ = [
     "ServerHandle",
     "TrendDirection",
     "build_default_modbus_consistency_cases",
+    "build_formula_process_consistency_cases",
     "build_default_live_modbus_cases",
     "build_generated_modbus_attack_cases",
     "create_benchmark_process_context",
+    "create_formula_benchmark_process_context",
     "decode_modbus_response_values",
     "import_cic_modbus_benchmark",
     "load_benchmark_cases",

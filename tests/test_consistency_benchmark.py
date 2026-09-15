@@ -8,7 +8,9 @@ from agentic_plc.evaluation import (
     benchmark_cases_from_payload,
     benchmark_cases_to_payload,
     build_default_modbus_consistency_cases,
+    build_formula_process_consistency_cases,
     create_benchmark_process_context,
+    create_formula_benchmark_process_context,
 )
 
 
@@ -16,21 +18,25 @@ class ConsistencyBenchmarkTests(unittest.TestCase):
     def test_default_cases_cover_protocol_and_physical_consistency(self) -> None:
         cases = build_default_modbus_consistency_cases()
 
-        self.assertEqual(len(cases), 5)
+        self.assertEqual(len(cases), 6)
         tags = {tag for case in cases for tag in case.tags}
         self.assertIn("protocol_fsm", tags)
         self.assertIn("physical_consistency", tags)
         self.assertIn("generated_reply_gate", tags)
+        self.assertIn("snapshot_consistency", tags)
+        self.assertIn("memory_consistency", tags)
 
     def test_runner_passes_default_modbus_consistency_benchmark(self) -> None:
         report = ConsistencyBenchmarkRunner().run()
 
         self.assertTrue(report.passed)
-        self.assertEqual(report.total_steps, 9)
+        self.assertEqual(report.total_steps, 13)
         self.assertEqual(
             report.status_counts(),
-            {"allowed": 7, "anomalous": 1, "denied": 1},
+            {"allowed": 11, "anomalous": 1, "denied": 1},
         )
+        self.assertEqual(report.check_group_counts()["snapshot_consistency"]["passed"], 6)
+        self.assertEqual(report.check_group_counts()["memory_consistency"]["passed"], 12)
 
     def test_write_then_readback_checks_physical_and_reply_values(self) -> None:
         case = next(
@@ -65,6 +71,25 @@ class ConsistencyBenchmarkTests(unittest.TestCase):
         assert result.forced_reply_error is not None
         self.assertIn("protocol state machine", result.forced_reply_error)
 
+    def test_snapshot_memory_governance_case_tracks_context_and_revisions(self) -> None:
+        case = next(
+            case
+            for case in build_default_modbus_consistency_cases()
+            if case.case_id == "modbus_snapshot_memory_governance"
+        )
+
+        results = ConsistencyBenchmarkRunner().run_case(case)
+
+        self.assertTrue(all(result.passed for result in results))
+        self.assertEqual([result.snapshot_revision_delta for result in results], [0, 1, 1, 0])
+        self.assertEqual(results[1].patch_base_revisions, (0,))
+        self.assertEqual(results[2].patch_base_revisions, (1,))
+        assert results[-1].memory_result is not None
+        self.assertEqual(results[-1].memory_result.actor_event_count, 4)
+        self.assertIn("level_sp", results[-1].memory_result.touched_variables)
+        self.assertIn("pump_cmd", results[-1].memory_result.touched_variables)
+        self.assertIn("level_sp", results[-1].memory_result.selected_variables)
+
     def test_report_is_json_serializable(self) -> None:
         report = ConsistencyBenchmarkRunner().run()
 
@@ -96,6 +121,21 @@ class ConsistencyBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(context.backend.read("level_sp"), 50.0)
         self.assertEqual(context.values_for_modbus_event(_read_holding_event()), [500])
+
+    def test_formula_process_cases_cover_dynamic_backend(self) -> None:
+        cases = build_formula_process_consistency_cases()
+
+        report = ConsistencyBenchmarkRunner(
+            process_context_factory=create_formula_benchmark_process_context,
+        ).run(cases)
+
+        self.assertTrue(report.passed)
+        self.assertEqual(report.total_steps, 2)
+        results = report.cases["formula_process_write_then_dynamics"]
+        self.assertEqual(results[0].snapshot_revision_delta, 2)
+        self.assertEqual(results[0].patch_base_revisions, (0,))
+        self.assertAlmostEqual(results[0].process_values["level_pct"], 53.9)
+        self.assertEqual(results[1].reply_values, (539,))
 
 
 def _read_holding_event():

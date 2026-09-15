@@ -9,7 +9,7 @@ from agentic_plc.contracts.actions import AgentProposal, ProtocolReply, WorldPat
 from agentic_plc.contracts.events import DeceptionPlan, ICSEvent, Intent
 from agentic_plc.policy.plan_validator import DeceptionPlanValidator
 from agentic_plc.policy.protocol_reply_validator import ProtocolReplyValidator
-from agentic_plc.processes import ProcessPatchApplier
+from agentic_plc.processes import ProcessPatchApplier, ProcessSnapshotManager
 from agentic_plc.protocols.modbus import ModbusFrameError, parse_modbus_tcp_frame
 from agentic_plc.world.model import TankPumpWorld
 from agentic_plc.world.patch import AppliedWorldPatch, WorldPatchApplier
@@ -44,6 +44,7 @@ class AgentController:
         protocol_reply_validator: ProtocolReplyValidator | None = None,
         world_patch_applier: WorldPatchApplier | None = None,
         process_patch_applier: ProcessPatchApplier | None = None,
+        process_snapshot_manager: ProcessSnapshotManager | None = None,
         world: TankPumpWorld | None = None,
         process_context: PhysicalProcessContext | None = None,
     ) -> None:
@@ -54,6 +55,10 @@ class AgentController:
         )
         self._world_patch_applier = world_patch_applier or WorldPatchApplier()
         self._process_patch_applier = process_patch_applier or ProcessPatchApplier()
+        self._process_snapshot_manager = (
+            process_snapshot_manager
+            or ProcessSnapshotManager(self._process_patch_applier)
+        )
         self._world = world
         self._process_context = process_context
 
@@ -135,7 +140,7 @@ class AgentController:
             elif self._process_context is not None:
                 try:
                     world_patches.append(
-                        self._process_patch_applier.apply(
+                        self._process_snapshot_manager.apply(
                             self._process_context.backend,
                             proposal.world_patch,
                         )

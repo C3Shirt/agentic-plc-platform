@@ -383,7 +383,9 @@ class OpenAICompatiblePlanner:
             "transaction_id, unit_id, and either payload_hex or structured "
             "fields such as function_code, values, address, count, or "
             "exception_code. World patches may only use path values from "
-            "allowed_world_patch_paths. For a successful Modbus write "
+            "allowed_world_patch_paths and should include metadata.base_revision, "
+            "metadata.process_id, and metadata.backend_name from snapshot_preconditions. "
+            "For a successful Modbus write "
             "acknowledgement, include a world_patch that decodes the requested "
             "register value into the exact mapped process variable engineering "
             "value. Do not invent unmapped PLC addresses. Payload: "
@@ -392,6 +394,15 @@ class OpenAICompatiblePlanner:
                     "allowed_world_patch_paths": writable_paths,
                     "events": compact_events,
                     "process_context": context_payload,
+                    "snapshot_preconditions": (
+                        {
+                            "base_revision": context.snapshot().revision,
+                            "process_id": context.process_id,
+                            "backend_name": context.backend_name,
+                        }
+                        if context
+                        else None
+                    ),
                 },
                 sort_keys=True,
             )

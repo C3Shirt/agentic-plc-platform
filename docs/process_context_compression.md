@@ -48,10 +48,17 @@ summarization.
    LongLLMLingua motivate budgeted key-information retention under long prompts;
    RAG motivates explicit retrieval/memory instead of relying only on parametric
    model memory.
-5. **Agent memory and action loops.** ReAct and Reflexion motivate separating
-   reasoning/action payloads from compact episodic memory. PACC keeps an actor
-   memory summary, but generated actions still pass through typed platform
-   validators.
+5. **Agent-specific context compression.** ACON motivates optimizing compressed
+   histories and observations for long-horizon agents, where state, action
+   outcomes, preconditions, and future decision cues must survive compression.
+   For this project, those cues are protocol transaction fields, touched
+   registers, decoded engineering values, writable surfaces, and snapshot
+   revisions.
+6. **Agent memory and action loops.** ReAct and Reflexion motivate separating
+   reasoning/action payloads from compact episodic memory. A-Mem and recent
+   agent-memory surveys further motivate dynamically organizing interaction
+   memory instead of treating it as append-only logs. PACC keeps an actor memory
+   summary, but generated actions still pass through typed platform validators.
 
 ## Compression contract
 
@@ -145,9 +152,16 @@ python tools\smoke_context_compressor.py
   Large Language Models*. 2023. https://arxiv.org/abs/2310.05736
 - Jiang et al. *LongLLMLingua: Accelerating and Enhancing LLMs in Long Context
   Scenarios via Prompt Compression*. 2023. https://arxiv.org/abs/2310.06839
+- Kang et al. *ACON: Optimizing Context Compression for Long-horizon LLM
+  Agents*. ICML 2026/arXiv. https://arxiv.org/abs/2510.00615
 - Lewis et al. *Retrieval-Augmented Generation for Knowledge-Intensive NLP
   Tasks*. NeurIPS, 2020. https://arxiv.org/abs/2005.11401
 - Yao et al. *ReAct: Synergizing Reasoning and Acting in Language Models*.
   ICLR, 2023. https://arxiv.org/abs/2210.03629
 - Shinn et al. *Reflexion: Language Agents with Verbal Reinforcement Learning*.
   NeurIPS, 2023. https://arxiv.org/abs/2303.11366
+- Xu et al. *A-Mem: Agentic Memory for LLM Agents*. NeurIPS, 2025.
+  https://proceedings.neurips.cc/paper_files/paper/2025/hash/19909c36f51abc4856b4560aff3d36d6-Abstract-Conference.html
+- Luo et al. *From Storage to Experience: A Survey on the Evolution of LLM
+  Agent Memory Mechanisms*. Findings of ACL, 2026.
+  https://aclanthology.org/2026.findings-acl.2069/

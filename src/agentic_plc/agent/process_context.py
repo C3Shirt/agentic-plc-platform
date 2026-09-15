@@ -155,6 +155,7 @@ class PhysicalProcessContext:
         plans = self.register_map.preview_write_many(area, event.address, values)
         if not plans:
             return None
+        snapshot = self.snapshot()
         return WorldPatch(
             actor_id=event.actor_id or f"ip:{event.source_ip}",
             reason=(
@@ -174,6 +175,9 @@ class PhysicalProcessContext:
                 for plan in plans
             ],
             metadata={
+                "base_revision": snapshot.revision,
+                "process_id": snapshot.process_id,
+                "backend_name": snapshot.backend_name,
                 "source_protocol": "modbus",
                 "transaction_id": event.transaction_id,
                 "unit_id": event.unit_id,

@@ -9,11 +9,13 @@ from agentic_plc.adapters import (
     event_from_modbus_tcp_request,
 )
 from agentic_plc.agent import AgentRuntime
+from agentic_plc.agent.context_compressor import ProcessContextCompressor
 from agentic_plc.agent.process_context import PhysicalProcessContext
 from agentic_plc.agent.protocol_state_machine import ProtocolTransitionStatus
 from agentic_plc.contracts.actions import ProtocolReply
 from agentic_plc.contracts.events import ICSEvent, Intent
 from agentic_plc.evaluation.physical_invariants import (
+    InvariantComparison,
     ProcessInvariant,
     ProcessInvariantEvaluator,
     ProcessInvariantKind,
@@ -22,6 +24,8 @@ from agentic_plc.evaluation.physical_invariants import (
 )
 from agentic_plc.policy.protocol_reply_validator import ProtocolReplyValidator
 from agentic_plc.processes import (
+    FormulaEquation,
+    FormulaProcessBackend,
     ProcessRegisterMap,
     ProcessVariable,
     ScenarioMapping,
@@ -53,7 +57,13 @@ class BenchmarkStep:
     expected_response_kind: str | None = None
     expected_exception_code: int | None = None
     process_invariants: tuple[ProcessInvariant, ...] = ()
+    expected_snapshot_revision_delta: int | None = None
+    expected_patch_base_revision_matches_before: bool | None = None
+    expected_context_selected_variables: tuple[str, ...] = ()
+    expected_actor_memory_event_count: int | None = None
+    expected_actor_memory_touched_variables: tuple[str, ...] = ()
     tick_seconds_before: float = 0.0
+    tick_seconds_after: float = 0.0
     forced_reply_hex: str | None = None
     expected_forced_reply_accepted: bool | None = None
     notes: str = ""
@@ -77,7 +87,19 @@ class BenchmarkStep:
             "process_invariants": [
                 invariant.to_dict() for invariant in self.process_invariants
             ],
+            "expected_snapshot_revision_delta": self.expected_snapshot_revision_delta,
+            "expected_patch_base_revision_matches_before": (
+                self.expected_patch_base_revision_matches_before
+            ),
+            "expected_context_selected_variables": list(
+                self.expected_context_selected_variables
+            ),
+            "expected_actor_memory_event_count": self.expected_actor_memory_event_count,
+            "expected_actor_memory_touched_variables": list(
+                self.expected_actor_memory_touched_variables
+            ),
             "tick_seconds_before": self.tick_seconds_before,
+            "tick_seconds_after": self.tick_seconds_after,
             "forced_reply_hex": self.forced_reply_hex,
             "expected_forced_reply_accepted": self.expected_forced_reply_accepted,
             "notes": self.notes,
@@ -116,6 +138,11 @@ class BenchmarkStepResult:
     world_patch_count: int
     rejected: tuple[dict[str, str], ...]
     process_values: Mapping[str, float]
+    snapshot_revision_before: int | None = None
+    snapshot_revision_after: int | None = None
+    snapshot_revision_delta: int | None = None
+    patch_base_revisions: tuple[int | None, ...] = ()
+    memory_result: BenchmarkMemoryResult | None = None
     process_invariant_results: tuple[ProcessInvariantResult, ...] = ()
     forced_reply_accepted: bool | None = None
     forced_reply_error: str | None = None
@@ -139,6 +166,15 @@ class BenchmarkStepResult:
             "world_patch_count": self.world_patch_count,
             "rejected": list(self.rejected),
             "process_values": dict(self.process_values),
+            "snapshot_revision_before": self.snapshot_revision_before,
+            "snapshot_revision_after": self.snapshot_revision_after,
+            "snapshot_revision_delta": self.snapshot_revision_delta,
+            "patch_base_revisions": list(self.patch_base_revisions),
+            "memory_result": (
+                self.memory_result.to_dict()
+                if self.memory_result is not None
+                else None
+            ),
             "process_invariant_results": [
                 result.to_dict() for result in self.process_invariant_results
             ],
@@ -146,6 +182,37 @@ class BenchmarkStepResult:
             "forced_reply_error": self.forced_reply_error,
             "checks": dict(self.checks),
             "passed": self.passed,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkMemoryResult:
+    """Observed memory/compression state for one benchmark step."""
+
+    strategy: str | None
+    selected_variables: tuple[str, ...] = ()
+    selected_reason_codes: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    actor_id: str | None = None
+    actor_event_count: int | None = None
+    touched_variables: tuple[str, ...] = ()
+    recent_event_count: int = 0
+    request_focus: Mapping[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "strategy": self.strategy,
+            "selected_variables": list(self.selected_variables),
+            "selected_reason_codes": {
+                variable_id: list(reason_codes)
+                for variable_id, reason_codes in self.selected_reason_codes.items()
+            },
+            "actor_id": self.actor_id,
+            "actor_event_count": self.actor_event_count,
+            "touched_variables": list(self.touched_variables),
+            "recent_event_count": self.recent_event_count,
+            "request_focus": (
+                dict(self.request_focus) if self.request_focus is not None else None
+            ),
         }
 
 
@@ -177,12 +244,26 @@ class BenchmarkReport:
                 counts[result.protocol_status] += 1
         return dict(sorted(counts.items()))
 
+    def check_group_counts(self) -> dict[str, dict[str, int]]:
+        counts: dict[str, Counter[str]] = {}
+        for results in self.cases.values():
+            for result in results:
+                for check_name, passed in result.checks.items():
+                    group = _check_group(check_name)
+                    group_counts = counts.setdefault(group, Counter())
+                    group_counts["passed" if passed else "failed"] += 1
+        return {
+            group: dict(sorted(group_counts.items()))
+            for group, group_counts in sorted(counts.items())
+        }
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "passed": self.passed,
             "passed_steps": self.passed_steps,
             "total_steps": self.total_steps,
             "protocol_status_counts": self.status_counts(),
+            "check_group_counts": self.check_group_counts(),
             "cases": {
                 case_id: [result.to_dict() for result in results]
                 for case_id, results in self.cases.items()
@@ -198,11 +279,13 @@ class ConsistencyBenchmarkRunner:
         *,
         process_context_factory: ProcessContextFactory | None = None,
         invariant_evaluator: ProcessInvariantEvaluator | None = None,
+        context_compressor: ProcessContextCompressor | None = None,
     ) -> None:
         self._process_context_factory = (
             process_context_factory or create_benchmark_process_context
         )
         self._invariant_evaluator = invariant_evaluator or ProcessInvariantEvaluator()
+        self._context_compressor = context_compressor or ProcessContextCompressor()
 
     def run(
         self,
@@ -231,6 +314,8 @@ class ConsistencyBenchmarkRunner:
                 context.backend.tick(step.tick_seconds_before)
             before_snapshot = context.snapshot() if context is not None else None
             decision = runtime.observe_and_decide(step.event)
+            if context is not None and step.tick_seconds_after > 0:
+                context.backend.tick(step.tick_seconds_after)
             after_snapshot = context.snapshot() if context is not None else None
             observed_event = event_log.list_events()[-1]
             protocol_status = str(
@@ -238,6 +323,12 @@ class ConsistencyBenchmarkRunner:
             )
             protocol_reason = observed_event.metadata.get("protocol_fsm_reason")
             reply_values = _reply_values(decision.protocol_replies[0].payload_hex) if decision.protocol_replies else None
+            patch_base_revisions = _patch_base_revisions(decision.world_patches)
+            memory_result = _memory_result(
+                self._context_compressor,
+                context,
+                event_log.list_events(),
+            )
             process_values = _read_process_values(
                 context,
                 step.expected_process_values.keys(),
@@ -261,6 +352,15 @@ class ConsistencyBenchmarkRunner:
                 world_patch_count=len(decision.world_patches),
                 process_values=process_values,
                 reply_values=reply_values,
+                snapshot_revision_delta=_snapshot_revision_delta(
+                    before_snapshot,
+                    after_snapshot,
+                ),
+                patch_base_revisions=patch_base_revisions,
+                before_snapshot_revision=(
+                    before_snapshot.revision if before_snapshot is not None else None
+                ),
+                memory_result=memory_result,
                 forced_reply_accepted=forced_reply_accepted,
                 process_invariant_results=process_invariant_results,
             )
@@ -286,6 +386,22 @@ class ConsistencyBenchmarkRunner:
                         for item in decision.rejected
                     ),
                     process_values=process_values,
+                    snapshot_revision_before=(
+                        before_snapshot.revision
+                        if before_snapshot is not None
+                        else None
+                    ),
+                    snapshot_revision_after=(
+                        after_snapshot.revision
+                        if after_snapshot is not None
+                        else None
+                    ),
+                    snapshot_revision_delta=_snapshot_revision_delta(
+                        before_snapshot,
+                        after_snapshot,
+                    ),
+                    patch_base_revisions=patch_base_revisions,
+                    memory_result=memory_result,
                     process_invariant_results=process_invariant_results,
                     forced_reply_accepted=forced_reply_accepted,
                     forced_reply_error=forced_reply_error,
@@ -461,6 +577,101 @@ def build_default_modbus_consistency_cases() -> tuple[BenchmarkCase, ...]:
             ),
         ),
         BenchmarkCase(
+            case_id="modbus_snapshot_memory_governance",
+            description=(
+                "A multi-step actor session should keep snapshot revisions, "
+                "patch preconditions, touched PLC points, and compressed "
+                "process context consistent across reads and writes."
+            ),
+            tags=(
+                "protocol_fsm",
+                "physical_consistency",
+                "snapshot_consistency",
+                "memory_consistency",
+                "context_compression",
+            ),
+            steps=(
+                _modbus_step_from_request(
+                    step_id="read_initial_level_measurement",
+                    request_hex=_modbus_read_input_request(
+                        transaction_id=600,
+                        address=0,
+                        count=1,
+                    ),
+                    expected_protocol_status=ProtocolTransitionStatus.ALLOWED,
+                    expected_reply_generated=True,
+                    expected_world_patch_count=0,
+                    expected_reply_values=(480,),
+                    expected_snapshot_revision_delta=0,
+                    expected_context_selected_variables=("level_pct",),
+                    expected_actor_memory_event_count=1,
+                    expected_actor_memory_touched_variables=("level_pct",),
+                ),
+                _modbus_step_from_request(
+                    step_id="write_setpoint_from_same_actor",
+                    request_hex=_modbus_write_single_register_request(
+                        transaction_id=601,
+                        address=0,
+                        value=650,
+                    ),
+                    expected_protocol_status=ProtocolTransitionStatus.ALLOWED,
+                    expected_reply_generated=True,
+                    expected_world_patch_count=1,
+                    expected_process_values={"level_sp": 65.0},
+                    expected_snapshot_revision_delta=1,
+                    expected_patch_base_revision_matches_before=True,
+                    expected_context_selected_variables=("level_sp",),
+                    expected_actor_memory_event_count=2,
+                    expected_actor_memory_touched_variables=(
+                        "level_pct",
+                        "level_sp",
+                    ),
+                ),
+                _modbus_step_from_request(
+                    step_id="write_pump_command_from_same_actor",
+                    request_hex=_modbus_write_single_coil_request(
+                        transaction_id=602,
+                        address=0,
+                        energized=False,
+                    ),
+                    expected_protocol_status=ProtocolTransitionStatus.ALLOWED,
+                    expected_reply_generated=True,
+                    expected_world_patch_count=1,
+                    expected_process_values={"pump_cmd": 0.0},
+                    expected_snapshot_revision_delta=1,
+                    expected_patch_base_revision_matches_before=True,
+                    expected_context_selected_variables=("pump_cmd",),
+                    expected_actor_memory_event_count=3,
+                    expected_actor_memory_touched_variables=(
+                        "level_pct",
+                        "level_sp",
+                        "pump_cmd",
+                    ),
+                ),
+                _modbus_step_from_request(
+                    step_id="readback_setpoint_with_actor_memory",
+                    request_hex=_modbus_read_holding_request(
+                        transaction_id=603,
+                        address=0,
+                        count=1,
+                    ),
+                    expected_protocol_status=ProtocolTransitionStatus.ALLOWED,
+                    expected_reply_generated=True,
+                    expected_world_patch_count=0,
+                    expected_process_values={"level_sp": 65.0},
+                    expected_reply_values=(650,),
+                    expected_snapshot_revision_delta=0,
+                    expected_context_selected_variables=("level_sp",),
+                    expected_actor_memory_event_count=4,
+                    expected_actor_memory_touched_variables=(
+                        "level_pct",
+                        "level_sp",
+                        "pump_cmd",
+                    ),
+                ),
+            ),
+        ),
+        BenchmarkCase(
             case_id="modbus_denied_transition_blocks_forced_reply",
             description=(
                 "If the protocol FSM denies a transition, even a well-formed "
@@ -592,6 +803,168 @@ def create_benchmark_process_context() -> PhysicalProcessContext:
     )
 
 
+def create_formula_benchmark_process_context() -> PhysicalProcessContext:
+    """Create an equation-driven process backend for dynamic consistency tests."""
+
+    backend = FormulaProcessBackend(
+        process_id="formula_tank_process",
+        name="formula_tank",
+        variables=[
+            ProcessVariable(
+                variable_id="level_sp",
+                name="Level setpoint",
+                role="setpoint",
+                unit="%",
+                minimum=0.0,
+                maximum=100.0,
+                writable=True,
+            ),
+            ProcessVariable(
+                variable_id="level_pct",
+                name="Level measurement",
+                role="measurement",
+                unit="%",
+                minimum=0.0,
+                maximum=100.0,
+            ),
+            ProcessVariable(
+                variable_id="pump_cmd",
+                name="Pump command",
+                role="manipulated_variable",
+                minimum=0.0,
+                maximum=1.0,
+                writable=True,
+            ),
+        ],
+        initial_state={
+            "level_sp": 50.0,
+            "level_pct": 48.0,
+            "pump_cmd": 1.0,
+        },
+        equations=[
+            FormulaEquation(
+                target="level_pct",
+                expression=(
+                    "level_pct + dt * "
+                    "(0.2 * (level_sp - level_pct) + 1.5 * pump_cmd)"
+                ),
+                description=(
+                    "First-order attacker-observable level response driven by "
+                    "setpoint error and pump command."
+                ),
+            )
+        ],
+        metadata={"simulator_family": "formula_tank"},
+    )
+    scenario = ScenarioMapping.from_file("scenarios/formula_tank/scenario.json")
+    register_map = ProcessRegisterMap(backend, scenario)
+    return PhysicalProcessContext(
+        backend=backend,
+        scenario=scenario,
+        register_map=register_map,
+    )
+
+
+def build_formula_process_consistency_cases() -> tuple[BenchmarkCase, ...]:
+    """Build dynamic-process cases for equation-driven backend validation."""
+
+    return (
+        BenchmarkCase(
+            case_id="formula_process_write_then_dynamics",
+            description=(
+                "A formula-driven process backend should accept a setpoint "
+                "write, evolve the measurement toward the new target, and "
+                "serve a readback encoded from the evolved snapshot."
+            ),
+            tags=(
+                "formula_process",
+                "physical_consistency",
+                "snapshot_consistency",
+                "generated_reply_gate",
+            ),
+            steps=(
+                _modbus_step_from_request(
+                    step_id="write_level_setpoint_then_tick",
+                    request_hex=_modbus_write_single_register_request(
+                        transaction_id=700,
+                        address=0,
+                        value=700,
+                    ),
+                    expected_protocol_status=ProtocolTransitionStatus.ALLOWED,
+                    expected_reply_generated=True,
+                    expected_world_patch_count=1,
+                    expected_process_values={
+                        "level_sp": 70.0,
+                        "level_pct": 53.9,
+                    },
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="formula_level_moves_toward_setpoint",
+                            kind=ProcessInvariantKind.MOVES_TOWARD,
+                            variable_id="level_pct",
+                            target_variable="level_sp",
+                            tolerance=1e-6,
+                            description=(
+                                "After a setpoint write and one formula tick, "
+                                "the attacker-visible level should move toward "
+                                "the new setpoint."
+                            ),
+                        ),
+                        ProcessInvariant(
+                            invariant_id="formula_level_stays_bounded",
+                            kind=ProcessInvariantKind.VARIABLE_BETWEEN,
+                            variable_id="level_pct",
+                            description=(
+                                "Formula dynamics must keep the level inside "
+                                "declared engineering bounds."
+                            ),
+                        ),
+                        ProcessInvariant(
+                            invariant_id="formula_setpoint_above_level_after_tick",
+                            kind=ProcessInvariantKind.RELATION,
+                            left_variable="level_sp",
+                            right_variable="level_pct",
+                            operator=InvariantComparison.GT,
+                            tolerance=1e-6,
+                            description=(
+                                "One tick should move the level upward without "
+                                "instantaneously jumping to the setpoint."
+                            ),
+                        ),
+                    ),
+                    expected_snapshot_revision_delta=2,
+                    expected_patch_base_revision_matches_before=True,
+                    tick_seconds_after=1.0,
+                ),
+                _modbus_step_from_request(
+                    step_id="read_formula_level_after_dynamics",
+                    request_hex=_modbus_read_input_request(
+                        transaction_id=701,
+                        address=0,
+                        count=1,
+                    ),
+                    expected_protocol_status=ProtocolTransitionStatus.ALLOWED,
+                    expected_reply_generated=True,
+                    expected_world_patch_count=0,
+                    expected_process_values={"level_pct": 53.9},
+                    expected_reply_values=(539,),
+                    process_invariants=(
+                        ProcessInvariant(
+                            invariant_id="formula_reply_matches_evolved_snapshot",
+                            kind=ProcessInvariantKind.REPLY_MATCHES_PROCESS_SNAPSHOT,
+                            description=(
+                                "The generated read reply must encode the "
+                                "formula-evolved snapshot value."
+                            ),
+                        ),
+                    ),
+                    expected_snapshot_revision_delta=0,
+                ),
+            ),
+        ),
+    )
+
+
 def _modbus_step_from_request(
     *,
     step_id: str,
@@ -602,7 +975,13 @@ def _modbus_step_from_request(
     expected_process_values: Mapping[str, float] | None = None,
     expected_reply_values: tuple[int, ...] | None = None,
     process_invariants: tuple[ProcessInvariant, ...] = (),
+    expected_snapshot_revision_delta: int | None = None,
+    expected_patch_base_revision_matches_before: bool | None = None,
+    expected_context_selected_variables: tuple[str, ...] = (),
+    expected_actor_memory_event_count: int | None = None,
+    expected_actor_memory_touched_variables: tuple[str, ...] = (),
     tick_seconds_before: float = 0.0,
+    tick_seconds_after: float = 0.0,
 ) -> BenchmarkStep:
     event = event_from_modbus_tcp_request(
         bytes.fromhex(request_hex),
@@ -625,7 +1004,17 @@ def _modbus_step_from_request(
         expected_process_values=dict(expected_process_values or {}),
         expected_reply_values=expected_reply_values,
         process_invariants=process_invariants,
+        expected_snapshot_revision_delta=expected_snapshot_revision_delta,
+        expected_patch_base_revision_matches_before=(
+            expected_patch_base_revision_matches_before
+        ),
+        expected_context_selected_variables=expected_context_selected_variables,
+        expected_actor_memory_event_count=expected_actor_memory_event_count,
+        expected_actor_memory_touched_variables=(
+            expected_actor_memory_touched_variables
+        ),
         tick_seconds_before=tick_seconds_before,
+        tick_seconds_after=tick_seconds_after,
     )
 
 
@@ -674,6 +1063,33 @@ def _modbus_read_holding_request(
         transaction_id=transaction_id,
         function_code=3,
         data=address.to_bytes(2, "big") + count.to_bytes(2, "big"),
+    )
+
+
+def _modbus_read_input_request(
+    *,
+    transaction_id: int,
+    address: int,
+    count: int,
+) -> str:
+    return _modbus_request_frame_hex(
+        transaction_id=transaction_id,
+        function_code=4,
+        data=address.to_bytes(2, "big") + count.to_bytes(2, "big"),
+    )
+
+
+def _modbus_write_single_coil_request(
+    *,
+    transaction_id: int,
+    address: int,
+    energized: bool,
+) -> str:
+    value = 0xFF00 if energized else 0x0000
+    return _modbus_request_frame_hex(
+        transaction_id=transaction_id,
+        function_code=5,
+        data=address.to_bytes(2, "big") + value.to_bytes(2, "big"),
     )
 
 
@@ -736,6 +1152,10 @@ def _checks_for_step(
     world_patch_count: int,
     process_values: Mapping[str, float],
     reply_values: tuple[int, ...] | None,
+    snapshot_revision_delta: int | None,
+    patch_base_revisions: tuple[int | None, ...],
+    before_snapshot_revision: int | None,
+    memory_result: BenchmarkMemoryResult | None,
     forced_reply_accepted: bool | None,
     process_invariant_results: tuple[ProcessInvariantResult, ...],
 ) -> dict[str, bool]:
@@ -756,6 +1176,47 @@ def _checks_for_step(
         )
     if step.expected_reply_values is not None:
         checks["reply_values"] = reply_values == step.expected_reply_values
+    if step.expected_snapshot_revision_delta is not None:
+        checks["snapshot_revision_delta"] = (
+            snapshot_revision_delta == step.expected_snapshot_revision_delta
+        )
+    if step.expected_patch_base_revision_matches_before is not None:
+        matches = (
+            before_snapshot_revision is not None
+            and patch_base_revisions
+            and all(
+                revision == before_snapshot_revision
+                for revision in patch_base_revisions
+            )
+        )
+        checks["patch_base_revision_matches_before"] = (
+            bool(matches)
+            == step.expected_patch_base_revision_matches_before
+        )
+    if step.expected_context_selected_variables:
+        selected = (
+            set(memory_result.selected_variables)
+            if memory_result is not None
+            else set()
+        )
+        checks["memory_context_selected_variables"] = set(
+            step.expected_context_selected_variables
+        ).issubset(selected)
+    if step.expected_actor_memory_event_count is not None:
+        checks["memory_actor_event_count"] = (
+            memory_result is not None
+            and memory_result.actor_event_count
+            == step.expected_actor_memory_event_count
+        )
+    if step.expected_actor_memory_touched_variables:
+        touched = (
+            set(memory_result.touched_variables)
+            if memory_result is not None
+            else set()
+        )
+        checks["memory_touched_variables"] = set(
+            step.expected_actor_memory_touched_variables
+        ).issubset(touched)
     if step.expected_forced_reply_accepted is not None:
         checks["forced_reply_accepted"] = (
             forced_reply_accepted == step.expected_forced_reply_accepted
@@ -777,6 +1238,58 @@ def _read_process_values(
     return values
 
 
+def _snapshot_revision_delta(
+    before_snapshot: Any,
+    after_snapshot: Any,
+) -> int | None:
+    if before_snapshot is None or after_snapshot is None:
+        return None
+    return int(after_snapshot.revision) - int(before_snapshot.revision)
+
+
+def _patch_base_revisions(applied_patches: Any) -> tuple[int | None, ...]:
+    revisions: list[int | None] = []
+    for applied_patch in applied_patches:
+        metadata = getattr(getattr(applied_patch, "patch", None), "metadata", {})
+        value = metadata.get("base_revision") if isinstance(metadata, Mapping) else None
+        revisions.append(None if value is None else int(value))
+    return tuple(revisions)
+
+
+def _memory_result(
+    compressor: ProcessContextCompressor,
+    context: PhysicalProcessContext | None,
+    events: list[ICSEvent],
+) -> BenchmarkMemoryResult | None:
+    if context is None or not events:
+        return None
+    compressed = compressor.compress(context, events)
+    actor_memory = compressed.actor_memory
+    return BenchmarkMemoryResult(
+        strategy=compressed.compression.get("strategy"),
+        selected_variables=tuple(
+            point.variable_id for point in compressed.exposed_points
+        ),
+        selected_reason_codes={
+            point.variable_id: tuple(point.reason_codes)
+            for point in compressed.exposed_points
+        },
+        actor_id=actor_memory.actor_id if actor_memory is not None else None,
+        actor_event_count=(
+            actor_memory.event_count if actor_memory is not None else None
+        ),
+        touched_variables=(
+            tuple(point.variable_id for point in actor_memory.touched_points)
+            if actor_memory is not None
+            else ()
+        ),
+        recent_event_count=(
+            len(actor_memory.recent_events) if actor_memory is not None else 0
+        ),
+        request_focus=compressed.request_focus,
+    )
+
+
 def _reply_values(payload_hex: str) -> tuple[int, ...] | None:
     frame = parse_modbus_tcp_frame(payload_hex)
     if frame.is_exception or frame.function_code not in {3, 4}:
@@ -793,3 +1306,22 @@ def _optional_text(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _check_group(check_name: str) -> str:
+    if check_name.startswith("protocol_"):
+        return "protocol_state"
+    if check_name.startswith("snapshot_") or check_name.startswith("patch_base_"):
+        return "snapshot_consistency"
+    if check_name.startswith("memory_"):
+        return "memory_consistency"
+    if check_name.startswith("process_"):
+        return "physical_process"
+    if check_name in {
+        "reply_generated",
+        "reply_values",
+        "forced_reply_accepted",
+        "world_patch_count",
+    }:
+        return "generated_action"
+    return "other"

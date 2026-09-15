@@ -1,0 +1,47 @@
+{
+  "scenario_id": "formula_tank_level_control_cell",
+  "process_id": "formula_tank_process",
+  "backend": {
+    "type": "formula"
+  },
+  "plc_area": "tank_level_control_cell",
+  "description": "A generic equation-driven tank process slice for snapshot/memory consistency experiments.",
+  "points": [
+    {
+      "variable_id": "level_sp",
+      "protocol": "modbus",
+      "table": "holding_registers",
+      "address": 0,
+      "access": "read_write",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "LEVEL_SP",
+      "description": "Level controller setpoint encoded as percent times ten."
+    },
+    {
+      "variable_id": "level_pct",
+      "protocol": "modbus",
+      "table": "input_registers",
+      "address": 0,
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 10.0,
+      "tag": "LEVEL_PCT",
+      "description": "Tank level measurement encoded as percent times ten."
+    },
+    {
+      "variable_id": "pump_cmd",
+      "protocol": "modbus",
+      "table": "coils",
+      "address": 0,
+      "access": "read_write",
+      "data_type": "bool",
+      "tag": "PUMP_CMD",
+      "description": "Pump command coil."
+    }
+  ],
+  "metadata": {
+    "purpose": "formula-process-agent baseline",
+    "not_high_fidelity_claim": true
+  }
+}

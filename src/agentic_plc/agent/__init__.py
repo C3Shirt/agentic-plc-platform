@@ -40,6 +40,11 @@ from agentic_plc.contracts.actions import (
     WorldPatch,
     WorldPatchOperation,
 )
+from agentic_plc.processes import (
+    ProcessSnapshotManager,
+    ProcessSnapshotRecord,
+    ProcessSnapshotTransition,
+)
 
 __all__ = [
     "AgentController",
@@ -61,6 +66,9 @@ __all__ = [
     "PhysicalProcessContext",
     "ProcessAwareResponsePolicy",
     "ProcessContextCompressor",
+    "ProcessSnapshotManager",
+    "ProcessSnapshotRecord",
+    "ProcessSnapshotTransition",
     "ModbusTcpStateMachine",
     "ProtocolAddressRange",
     "ProtocolIntentTracker",

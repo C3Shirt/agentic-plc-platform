@@ -8,6 +8,8 @@ from agentic_plc.evaluation import (
     ConsistencyBenchmarkRunner,
     benchmark_cases_to_payload,
     build_default_modbus_consistency_cases,
+    build_formula_process_consistency_cases,
+    create_formula_benchmark_process_context,
     write_benchmark_payload,
 )
 
@@ -28,15 +30,28 @@ def main() -> int:
         action="store_true",
         help="Only emit benchmark case definitions without running the runtime.",
     )
+    parser.add_argument(
+        "--suite",
+        choices=("default", "formula"),
+        default="default",
+        help="Benchmark suite to generate. Use formula for equation-driven process cases.",
+    )
     args = parser.parse_args()
 
-    cases = build_default_modbus_consistency_cases()
+    if args.suite == "formula":
+        cases = build_formula_process_consistency_cases()
+        runner = ConsistencyBenchmarkRunner(
+            process_context_factory=create_formula_benchmark_process_context,
+        )
+    else:
+        cases = build_default_modbus_consistency_cases()
+        runner = ConsistencyBenchmarkRunner()
     if args.cases_only:
         payload = benchmark_cases_to_payload(cases)
     else:
         payload = {
             "cases": [case.to_dict() for case in cases],
-            "report": ConsistencyBenchmarkRunner().run(cases).to_dict(),
+            "report": runner.run(cases).to_dict(),
         }
 
     text = json.dumps(payload, indent=2, sort_keys=True)

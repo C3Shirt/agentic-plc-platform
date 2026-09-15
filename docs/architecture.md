@@ -96,6 +96,12 @@ turns scenario-mapped process variables into Modbus-style blocks, and
 `integrations/conpot/tennessee_eastman` loads that mapping through Conpot
 DataBus function values.
 
+Current status: `FormulaProcessBackend` now provides a generic equation-driven
+process provider for cases where attacker-observable dynamics are sufficient and
+a high-fidelity simulator is not required. The formula tank scenario under
+`scenarios/formula_tank` uses the same `ScenarioMapping` and `ProcessRegisterMap`
+path as TE, which keeps the protocol adapters process-agnostic.
+
 ### P2 - Unified telemetry
 
 - Create a unique session for every connection.
@@ -188,6 +194,9 @@ meaningful state changes, lure progression, honeypot suspicion, and p95 latency.
 Current status: a first local consistency benchmark exists under
 `agentic_plc.evaluation`. It generates reproducible Modbus TCP interaction
 cases and scores protocol FSM status, generated reply behavior, world-patch
-application, and process read-back consistency. The benchmark is synthetic by
-design; public datasets such as SWaT, WaDi, HAI, BATADAL, CIC Modbus 2023, and
-ICS-Flow can later be imported into the same case/report schema.
+application, process read-back consistency, snapshot revision consistency, and
+actor-memory/context-compression retention. A separate optional formula-process
+case validates dynamic attacker-observable physics over the same schema. The
+benchmark is synthetic by design; public datasets such as SWaT, WaDi, HAI,
+BATADAL, CIC Modbus 2023, and ICS-Flow can later be imported into the same
+case/report schema.
