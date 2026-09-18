@@ -119,6 +119,11 @@ deterministic response path.
   `docs/references_agentic_plc.bib` record the current LLM honeypot,
   agent-memory, context-compression, and world-model literature used to justify
   the snapshot/memory-governed research direction.
+- `agentic_plc.acquisition` implements the first physical-process acquisition
+  pipeline: a scene plan is converted into PLC/Modbus mappings, a PLC program
+  skeleton, normalized Modbus interaction traces, and a learned process model.
+  The included `cargo_sorting_height_v1` smoke path uses the earlier
+  height-based cargo sorting scenario as a reproducible example.
 
 Default Conpot DataBus keys:
 
@@ -234,6 +239,36 @@ python tools\smoke_modbus_responses.py
 python tools\smoke_process_write_through.py
 python tools\smoke_te_live_benchmark.py --synthetic
 ```
+
+Generate the cargo-sorting acquisition artifacts:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\smoke_cargo_sorting_acquisition.py
+```
+
+This produces a complete offline acquisition bundle under
+`records\cargo_sorting_acquisition`: acquisition plan, scenario mapping,
+CODESYS-style Structured Text skeleton, normalized Modbus interaction trace,
+and learned process model.
+
+Run a periodic Modbus TCP client against a live CODESYS runtime:
+
+```powershell
+$env:PYTHONPATH = "src"
+python tools\run_codesys_modbus_client.py `
+  --host 127.0.0.1 `
+  --port 502 `
+  --duration-seconds 30 `
+  --period-seconds 1 `
+  --output-dir records\codesys_periodic_client
+```
+
+The default mode is read-only and periodically reads `coils 0-10` and
+`discrete_inputs 0-6`. Add `--write-pattern pulse-coils --write-coils 0,1,4`
+when you want controlled coil pulses during acquisition. The tool writes
+`interaction_trace.jsonl`, `live_snapshots.jsonl`, `summary.json`, and
+`learned_process_model.json` under the selected output directory.
 
 `smoke_te_live_benchmark.py` starts a lightweight scenario-backed Modbus TCP
 endpoint and a JSON HMI endpoint, then runs the generated live Modbus benchmark
@@ -406,6 +441,8 @@ See `docs/architecture.md` for component boundaries and the implementation order
 See `docs/process_backend_design.md` for the generic simulator-backend boundary,
 the physical-process-agent wrapper, and the optional configuration materials
 needed for higher-fidelity demos.
+See `docs/physical_process_acquisition.md` for the scene-to-trace-to-model
+pipeline used by the cargo sorting example.
 See `docs/process_context_compression.md` for the paper-backed PACC design.
 See `docs/benchmark_landscape.md` for the public benchmark survey and why the
 local consistency benchmark is needed.

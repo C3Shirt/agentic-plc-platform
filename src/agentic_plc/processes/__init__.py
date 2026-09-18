@@ -14,6 +14,10 @@ from .base import (
     ReadOnlyProcessVariable,
     UnknownProcessVariable,
 )
+from .cargo_sorting import (
+    CargoSortingProcessBackend,
+    cargo_sorting_variables,
+)
 from .formula import (
     FormulaEquation,
     FormulaExpressionError,
@@ -38,6 +42,7 @@ from .trace import TraceProcessBackend
 
 __all__ = [
     "AgenticProcessBackend",
+    "CargoSortingProcessBackend",
     "NoOpPhysicalProcessAgentPolicy",
     "PhysicalProcessAgentContext",
     "PhysicalProcessAgentMemoryEntry",
@@ -66,4 +71,5 @@ __all__ = [
     "TennesseeEastmanTraceBackend",
     "TraceProcessBackend",
     "UnknownProcessVariable",
+    "cargo_sorting_variables",
 ]
